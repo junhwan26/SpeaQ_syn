@@ -1,4 +1,4 @@
-# SpeaQ: Multi-Dataset Scene Graph Generation
+# SpeaQ with Multi-Dataset Scene Graph Generation
 
 SpeaQ is a transformer-based scene graph generation model that supports both real and synthetic datasets with dynamic sampling and individual sample-level loss weighting.
 
