@@ -35,26 +35,47 @@ pip install -r requirements.txt
 
 #### Visual Genome Only:
 ```bash
-python train_iterative_model.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python train_iterative_model.py \
+    --resume --num-gpus 4 \
     --config-file configs/visual_genome.yaml \
-    --num-gpus 4
+    --dist-url 29503 \
+    OUTPUT_DIR outputs/visual_genome_training \
+    SOLVER.IMS_PER_BATCH 20 \
+    MODEL.WEIGHTS /home/junhwanheo/SpeaQ/vg_objectdetector_pretrained.pth
 ```
 
 #### Synthetic Dataset Only:
 ```bash
-python train_iterative_model.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python train_iterative_model.py \
+    --resume --num-gpus 4 \
     --config-file configs/synthetic_genome.yaml \
-    --num-gpus 4
+    --dist-url 29503 \
+    OUTPUT_DIR outputs/synthetic_training \
+    SOLVER.IMS_PER_BATCH 20 \
+    MODEL.WEIGHTS /home/junhwanheo/SpeaQ/vg_objectdetector_pretrained.pth
 ```
 
 ### Multi-Dataset Training
 
 #### Real + Synthetic with Custom Ratios:
 ```bash
-python train_iterative_model.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python train_iterative_model.py \
+    --resume --num-gpus 4 \
     --config-file configs/speaq_multi_dataset.yaml \
-    --num-gpus 4 \
+    --dist-url 29503 \
     OUTPUT_DIR outputs/multi_dataset_training \
+    SOLVER.IMS_PER_BATCH 20 \
+    MODEL.WEIGHTS /home/junhwanheo/SpeaQ/vg_objectdetector_pretrained.pth \
+    MODEL.DETR.ONE2MANY_SCHEME dynamic \
+    MODEL.DETR.MULTIPLY_QUERY 2 \
+    MODEL.DETR.ONLY_PREDICATE_MULTIPLY True \
+    MODEL.DETR.ONE2MANY_K 4 \
+    MODEL.DETR.ONE2MANY_DYNAMIC_SCHEME max \
+    MODEL.DETR.USE_GROUP_MASK True \
+    MODEL.DETR.MATCH_INDEPENDENT True \
+    MODEL.DETR.NUM_GROUPS 4 \
+    MODEL.DETR.ONE2MANY_PREDICATE_SCORE True \
+    MODEL.DETR.ONE2MANY_PREDICATE_WEIGHT -0.5 \
     DATASETS.MULTI_DATASET.REAL_SAMPLING_RATIO 0.7 \
     DATASETS.MULTI_DATASET.SYNTHETIC_SAMPLING_RATIO 0.3 \
     DATASETS.MULTI_DATASET.REAL_LOSS_WEIGHT 1.0 \
@@ -94,17 +115,32 @@ MODEL:
 
 ## Dataset Structure
 
-### Visual Genome Format
-```
-dataset/
-├── VG_100K/                    # Images
-├── VG-SGG-dicts-with-attri.json # Class mappings
-├── image_data.json             # Image metadata
-└── VG-SGG-with-attri.h5        # Annotations
-```
+### Dataset Preparation
 
-### Synthetic Dataset Format
-Same structure as Visual Genome but with synthetic images.
+The synthetic dataset uses the same format as Visual Genome but contains synthetic images instead of real images.
+
+#### Required Files
+
+The following files need to be prepared:
+
+1. **Image files**: `.jpg` files in the image directory
+2. **Annotation file**: `augmented_from_refined.h5` - HDF5 format same as Visual Genome
+3. **Metadata file**: `image_data_new.json` - Image metadata
+4. **Mapping dictionary**: `VG-SGG-dicts-with-attri.json` - Class and relation mappings
+
+#### Directory Structure
+
+```
+datasets/
+├── generated/                  # Synthetic dataset files
+│   ├── augmented_from_refined.h5    # Annotation data
+│   └── image_data_new.json          # Image metadata
+└── vg/                        # Real dataset files
+    ├── VG_100K/               # Real images
+    ├── VG-SGG-dicts-with-attri.json # Shared mapping dictionary
+    ├── image_data.json        # Real image metadata
+    └── VG-SGG-with-attri.h5   # Real annotation data
+```
 
 ## Key Features
 
@@ -137,11 +173,54 @@ Enhanced safety checks prevent NaN losses:
 ## Evaluation
 
 ```bash
-python train_iterative_model.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python train_iterative_model.py \
+    --resume --eval-only --num-gpus 4 \
     --config-file configs/speaq_multi_dataset.yaml \
-    --eval-only \
-    MODEL.WEIGHTS path/to/checkpoint.pth
+    --dist-url 29503 \
+    OUTPUT_DIR outputs/multi_dataset_training \
+    SOLVER.IMS_PER_BATCH 20
 ```
+
+## Parameter Descriptions
+
+### Dataset Parameters
+
+- `DATASETS.TYPE`: Set to "SYNTHETIC GENOME" for synthetic-only or "MULTI_DATASET" for combined training
+- `DATASETS.SYNTHETIC_GENOME.IMAGES`: Path to synthetic image directory
+- `DATASETS.SYNTHETIC_GENOME.VG_ATTRIBUTE_H5`: Path to annotation HDF5 file
+- `DATASETS.SYNTHETIC_GENOME.IMAGE_DATA`: Path to image metadata JSON file
+- `DATASETS.SYNTHETIC_GENOME.MAPPING_DICTIONARY`: Path to class mapping JSON file
+
+### SpeaQ Model Parameters
+
+- `MODEL.DETR.ONE2MANY_SCHEME`: 'dynamic' - Dynamic query generation scheme
+- `MODEL.DETR.MULTIPLY_QUERY`: 2 - Query amplification factor
+- `MODEL.DETR.ONLY_PREDICATE_MULTIPLY`: True - Amplify only relations
+- `MODEL.DETR.ONE2MANY_K`: 4 - Number of queries per relation
+- `MODEL.DETR.USE_GROUP_MASK`: True - Use group masking
+- `MODEL.DETR.MATCH_INDEPENDENT`: True - Independent matching
+- `MODEL.DETR.NUM_GROUPS`: 4 - Number of groups
+
+## Important Notes
+
+1. **Data Format**: Synthetic dataset must use the same HDF5 format as Visual Genome
+2. **File Paths**: Ensure correct data file paths in configuration files
+3. **GPU Memory**: GPU memory usage may vary depending on synthetic image resolution
+4. **Data Preprocessing**: Verify that data is correctly preprocessed
+
+## Troubleshooting
+
+### Common Issues
+
+1. **File Not Found**: Check if data file paths are correct
+2. **Out of Memory**: Reduce `SOLVER.IMS_PER_BATCH` value
+3. **Data Loading Error**: Verify HDF5 file format is correct
+
+### Debugging Tips
+
+- Set `DATASETS.SYNTHETIC_GENOME.FILTER_EMPTY_RELATIONS: False` to include empty relations
+- Test with smaller batch size first
+- Check logs for data loading status
 
 ## Results
 
