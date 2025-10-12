@@ -106,9 +106,22 @@ class DetrDatasetMapper:
 
         self.img_format = cfg.INPUT.FORMAT
         self.is_train = is_train
-        self.filter_duplicate_relations = cfg.DATASETS.VISUAL_GENOME.FILTER_DUPLICATE_RELATIONS
-        self.max_num_rels = cfg.DATASETS.VISUAL_GENOME.MAX_NUM_RELATIONS
-        self.max_num_objs = cfg.DATASETS.VISUAL_GENOME.MAX_NUM_OBJECTS
+        # Support Visual Genome, Synthetic Genome, and Multi-Dataset
+        if cfg.DATASETS.TYPE == "VISUAL GENOME":
+            self.filter_duplicate_relations = cfg.DATASETS.VISUAL_GENOME.FILTER_DUPLICATE_RELATIONS
+            self.max_num_rels = cfg.DATASETS.VISUAL_GENOME.MAX_NUM_RELATIONS
+            self.max_num_objs = cfg.DATASETS.VISUAL_GENOME.MAX_NUM_OBJECTS
+        elif cfg.DATASETS.TYPE == "SYNTHETIC GENOME":
+            self.filter_duplicate_relations = cfg.DATASETS.SYNTHETIC_GENOME.FILTER_DUPLICATE_RELATIONS
+            self.max_num_rels = cfg.DATASETS.SYNTHETIC_GENOME.MAX_NUM_RELATIONS
+            self.max_num_objs = cfg.DATASETS.SYNTHETIC_GENOME.MAX_NUM_OBJECTS
+        elif cfg.DATASETS.TYPE == "MULTI_DATASET":
+            # For multi-dataset, use primary dataset settings (Visual Genome)
+            self.filter_duplicate_relations = cfg.DATASETS.VISUAL_GENOME.FILTER_DUPLICATE_RELATIONS
+            self.max_num_rels = cfg.DATASETS.VISUAL_GENOME.MAX_NUM_RELATIONS
+            self.max_num_objs = cfg.DATASETS.VISUAL_GENOME.MAX_NUM_OBJECTS
+        else:
+            raise ValueError(f"Unsupported dataset type: {cfg.DATASETS.TYPE}")
         self.data_type = cfg.DATASETS.TYPE
 
 
@@ -199,8 +212,14 @@ class DetrDatasetMapper:
                 instances = annotations_to_instances_relation(annos, image_shape)           
                 
             if rel_present:
-                # Add object attributes
-                instances.gt_attributes = torch.tensor([obj['attribute'] for obj in annos], dtype=torch.int64)
+                # Add object attributes - optimized tensor creation
+                attributes = [obj['attribute'] for obj in annos]
+                if attributes:
+                    # Convert list to numpy array first, then to tensor (much faster)
+                    attributes_array = np.array(attributes, dtype=np.int64)
+                    instances.gt_attributes = torch.from_numpy(attributes_array)
+                else:
+                    instances.gt_attributes = torch.empty(0, dtype=torch.int64)
             if self.recompute_boxes:
                 instances.gt_boxes = instances.gt_masks.get_bounding_boxes()
             dataset_dict["instances"], filter_mask = utils.filter_empty_instances(instances, return_mask=True)
@@ -223,7 +242,7 @@ class DetrDatasetMapper:
             else:
                 dataset_dict['relations'] = torch.zeros(0, 3).long()
             
-            if self.data_type == "GQA":
+            if self.data_type in ["GQA", "SYNTHETIC GENOME", "MULTI_DATASET"]:
                 if len(dataset_dict['instances']) > self.max_num_objs:
                     # Randomly sample max number of objects
                     sample_idxs = np.random.permutation(np.arange(len(dataset_dict['instances'])))[:self.max_num_objs]

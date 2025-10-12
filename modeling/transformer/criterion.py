@@ -63,7 +63,50 @@ class SetCriterion(nn.Module):
                                     dtype=torch.int64, device=src_logits.device)
         target_classes[idx] = target_classes_o
 
+        # Compute standard cross entropy loss (base case)
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
+        
+        # Apply loss weights at individual sample level if safe
+        loss_weights = kwargs.get('loss_weights', None)
+        
+        if loss_weights is not None and len(idx[0]) > 0:
+            # Calculate per-sample loss weights based on batch indices
+            batch_indices = idx[0]  # batch indices of matched samples
+            sample_weights = loss_weights[batch_indices]
+            
+            # Enhanced safety check for weights
+            if (not torch.isnan(sample_weights).any() and 
+                not torch.isinf(sample_weights).any() and 
+                len(sample_weights) > 0 and
+                sample_weights.min() > 0):  # Ensure all weights are positive
+                
+                # Compute cross entropy loss per sample with input validation
+                src_logits_matched = src_logits[idx]  # [num_matched, num_classes]
+                target_classes_matched = target_classes_o  # [num_matched]
+                
+                # Validate inputs before cross entropy
+                if (not torch.isnan(src_logits_matched).any() and 
+                    not torch.isinf(src_logits_matched).any() and
+                    not torch.isnan(target_classes_matched).any() and
+                    (target_classes_matched >= 0).all() and 
+                    (target_classes_matched < self.num_classes).all()):
+                    
+                    try:
+                        losses_per_sample = F.cross_entropy(
+                            src_logits_matched, target_classes_matched, 
+                            self.empty_weight, reduction='none'
+                        )  # [num_matched]
+                        
+                        # Check for NaN in individual losses and apply weights
+                        if not torch.isnan(losses_per_sample).any() and not torch.isinf(losses_per_sample).any():
+                            # Apply individual weights and take mean
+                            weighted_losses = losses_per_sample * sample_weights
+                            loss_ce = weighted_losses.mean()
+                            
+                    except Exception:
+                        # Keep the standard loss if anything goes wrong
+                        pass
+        
         losses = {'loss_ce': loss_ce}
 
         if log:
@@ -96,14 +139,42 @@ class SetCriterion(nn.Module):
         target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
 
         loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
-
+        
+        # Apply loss weights at individual sample level
+        loss_weights = kwargs.get('loss_weights', None)
         losses = {}
-        losses['loss_bbox'] = loss_bbox.sum() / num_boxes if num_boxes > 0 else loss_bbox.sum()
+        if loss_weights is not None and len(idx[0]) > 0:
+            batch_indices = idx[0]
+            sample_weights = loss_weights[batch_indices].unsqueeze(-1)  # [N, 1] to match [N, 4]
+            # Safety check for weights
+            if not torch.isnan(sample_weights).any() and not torch.isinf(sample_weights).any():
+                # Apply individual sample weights
+                loss_bbox = loss_bbox * sample_weights
+                # Sum weighted losses
+                losses['loss_bbox'] = loss_bbox.sum() / num_boxes if num_boxes > 0 else loss_bbox.sum()
+            else:
+                losses['loss_bbox'] = loss_bbox.sum() / num_boxes if num_boxes > 0 else loss_bbox.sum()
+        else:
+            losses['loss_bbox'] = loss_bbox.sum() / num_boxes if num_boxes > 0 else loss_bbox.sum()
 
         loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(
             box_ops.box_cxcywh_to_xyxy(src_boxes),
             box_ops.box_cxcywh_to_xyxy(target_boxes)))
-        losses['loss_giou'] = loss_giou.sum() / num_boxes if num_boxes > 0 else loss_giou.sum()
+        
+        # Apply loss weights to giou loss at individual sample level
+        if loss_weights is not None and len(idx[0]) > 0:
+            batch_indices = idx[0]
+            sample_weights = loss_weights[batch_indices]
+            # Safety check for weights
+            if not torch.isnan(sample_weights).any() and not torch.isinf(sample_weights).any():
+                # Apply individual sample weights
+                loss_giou = loss_giou * sample_weights
+                # Sum weighted losses
+                losses['loss_giou'] = loss_giou.sum() / num_boxes if num_boxes > 0 else loss_giou.sum()
+            else:
+                losses['loss_giou'] = loss_giou.sum() / num_boxes if num_boxes > 0 else loss_giou.sum()
+        else:
+            losses['loss_giou'] = loss_giou.sum() / num_boxes if num_boxes > 0 else loss_giou.sum()
         return losses
 
     def loss_masks(self, outputs, targets, indices, num_boxes, **kwargs):
@@ -231,10 +302,38 @@ class IterativeRelationCriterionBase(nn.Module):
         empty_rel_weight = torch.ones(self.num_rel_classes + 1)
         empty_rel_weight[-1] = kwargs['rel_eos_coef']
         if self.reweight_rel:
-            if self.use_reweight_log:
-                empty_rel_weight = (self.statistics['fg_rel_count'].sum() / (self.statistics['fg_rel_count'] + 1e-5)).log()
+            # Enhanced safety check for statistics
+            fg_rel_count = self.statistics['fg_rel_count']
+            if torch.isnan(fg_rel_count).any() or torch.isinf(fg_rel_count).any():
+                print(f"WARNING: Invalid fg_rel_count in statistics: {fg_rel_count}")
+                empty_rel_weight = torch.ones(self.num_rel_classes + 1)
             else:
-                empty_rel_weight = (self.statistics['fg_rel_count'].sum() / (self.statistics['fg_rel_count'] + 1e-5))
+                rel_count_sum = fg_rel_count.sum()
+                if rel_count_sum <= 0:
+                    print(f"WARNING: fg_rel_count sum is {rel_count_sum}, using uniform weights")
+                    empty_rel_weight = torch.ones(self.num_rel_classes + 1)
+                else:
+                    try:
+                        if self.use_reweight_log:
+                            # Use larger epsilon for log calculation
+                            safe_weights = torch.clamp(fg_rel_count, min=1e-3)
+                            empty_rel_weight = (rel_count_sum / (safe_weights + 1e-3)).log()
+                        else:
+                            safe_weights = torch.clamp(fg_rel_count, min=1e-3)
+                            empty_rel_weight = rel_count_sum / (safe_weights + 1e-3)
+                        
+                        # Clamp to reasonable range
+                        empty_rel_weight = torch.clamp(empty_rel_weight, min=1e-6, max=1e6)
+                        
+                        # Check for NaN/Inf
+                        if torch.isnan(empty_rel_weight).any() or torch.isinf(empty_rel_weight).any():
+                            print(f"WARNING: NaN/Inf in empty_rel_weight calculation, using uniform weights")
+                            empty_rel_weight = torch.ones(self.num_rel_classes + 1)
+                            
+                    except Exception as e:
+                        print(f"WARNING: Exception in empty_rel_weight calculation: {e}, using uniform weights")
+                        empty_rel_weight = torch.ones(self.num_rel_classes + 1)
+            
             empty_rel_weight[-1] = kwargs['reweight_rel_eos_coef']
         print (empty_weight_obj)
         print (empty_rel_weight)
@@ -509,9 +608,42 @@ class IterativeRelationCriterion(IterativeRelationCriterionBase):
         self.match_independent = kwargs['match_independent']
 
         if self.reweight_rel:
-            empty_rel_weight = self.statistics['fg_rel_count'] / self.statistics['fg_rel_count'].sum() 
-            empty_rel_weight = torch.maximum((self.oversample_param / (empty_rel_weight + 1e-5)).sqrt(), torch.ones_like(empty_rel_weight))
-            empty_rel_weight = torch.pow(empty_rel_weight, self.undersample_param)
+            # Enhanced safety check for statistics
+            fg_rel_count = self.statistics['fg_rel_count']
+            if torch.isnan(fg_rel_count).any() or torch.isinf(fg_rel_count).any():
+                print(f"WARNING: Invalid fg_rel_count in statistics: {fg_rel_count}")
+                # Fallback to uniform weights
+                empty_rel_weight = torch.ones(self.num_rel_classes + 1)
+            else:
+                # Avoid division by zero and handle edge cases
+                rel_count_sum = fg_rel_count.sum()
+                if rel_count_sum <= 0:
+                    print(f"WARNING: fg_rel_count sum is {rel_count_sum}, using uniform weights")
+                    empty_rel_weight = torch.ones(self.num_rel_classes + 1)
+                else:
+                    empty_rel_weight = fg_rel_count / rel_count_sum
+                    
+                    # Enhanced safety for oversampling calculation
+                    try:
+                        # Use larger epsilon and clamp to prevent extreme values
+                        safe_weights = torch.clamp(empty_rel_weight, min=1e-3, max=1.0)
+                        oversample_ratio = self.oversample_param / (safe_weights + 1e-3)
+                        oversample_ratio = torch.clamp(oversample_ratio, min=1e-6, max=1e6)
+                        sqrt_ratio = torch.sqrt(oversample_ratio)
+                        sqrt_ratio = torch.clamp(sqrt_ratio, min=1e-3, max=1e3)
+                        
+                        empty_rel_weight = torch.pow(sqrt_ratio, self.undersample_param)
+                        empty_rel_weight = torch.clamp(empty_rel_weight, min=1e-6, max=1e6)
+                        
+                        # Check for NaN/Inf after calculation
+                        if torch.isnan(empty_rel_weight).any() or torch.isinf(empty_rel_weight).any():
+                            print(f"WARNING: NaN/Inf in empty_rel_weight calculation, using uniform weights")
+                            empty_rel_weight = torch.ones(self.num_rel_classes + 1)
+                            
+                    except Exception as e:
+                        print(f"WARNING: Exception in empty_rel_weight calculation: {e}, using uniform weights")
+                        empty_rel_weight = torch.ones(self.num_rel_classes + 1)
+            
             empty_rel_weight[-1] = kwargs['reweight_rel_eos_coef']
         else:
             empty_rel_weight = torch.ones(self.num_rel_classes + 1)
@@ -523,11 +655,55 @@ class IterativeRelationCriterion(IterativeRelationCriterionBase):
         src_logits = outputs['relation_logits']
         idx = self._get_src_permutation_idx_rel(indices)
         
+        # Get loss weights if provided
+        loss_weights = kwargs.get('loss_weights', None)
+        
         target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
         target_classes = torch.full(src_logits.shape[:2], self.num_rel_classes,
                                     dtype=torch.int64, device=src_logits.device)
         target_classes[idx] = target_classes_o
+        # Compute standard cross entropy loss (base case)
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_rel_weight)
+        
+        # Apply loss weights at individual sample level if safe
+        if loss_weights is not None and len(idx[0]) > 0:
+            # Calculate per-sample loss weights based on batch indices
+            batch_indices = idx[0]  # batch indices of matched samples
+            sample_weights = loss_weights[batch_indices]
+            
+            # Enhanced safety check for weights
+            if (not torch.isnan(sample_weights).any() and 
+                not torch.isinf(sample_weights).any() and 
+                len(sample_weights) > 0 and
+                sample_weights.min() > 0):  # Ensure all weights are positive
+                
+                # Compute cross entropy loss per sample with input validation
+                src_logits_matched = src_logits[idx]  # [num_matched, num_classes]
+                target_classes_matched = target_classes_o  # [num_matched]
+                
+                # Validate inputs before cross entropy
+                if (not torch.isnan(src_logits_matched).any() and 
+                    not torch.isinf(src_logits_matched).any() and
+                    not torch.isnan(target_classes_matched).any() and
+                    (target_classes_matched >= 0).all() and 
+                    (target_classes_matched < self.num_rel_classes).all()):
+                    
+                    try:
+                        losses_per_sample = F.cross_entropy(
+                            src_logits_matched, target_classes_matched, 
+                            self.empty_rel_weight, reduction='none'
+                        )  # [num_matched]
+                        
+                        # Check for NaN in individual losses and apply weights
+                        if not torch.isnan(losses_per_sample).any() and not torch.isinf(losses_per_sample).any():
+                            # Apply individual weights and take mean
+                            weighted_losses = losses_per_sample * sample_weights
+                            loss_ce = weighted_losses.mean()
+                            
+                    except Exception:
+                        # Keep the standard loss if anything goes wrong
+                        pass
+        
         losses = {'loss_relation': loss_ce}
 
         if len(idx[0]) > 0:
@@ -535,13 +711,40 @@ class IterativeRelationCriterion(IterativeRelationCriterionBase):
             target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
 
             loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
-
-            losses['loss_bbox_relation'] = loss_bbox.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_bbox.sum()
+            
+            # Apply loss weights to bbox loss at individual sample level
+            if loss_weights is not None and len(idx[0]) > 0:
+                batch_indices = idx[0]
+                sample_weights = loss_weights[batch_indices].unsqueeze(-1)  # [N, 1] to match [N, 4]
+                # Safety check for weights
+                if not torch.isnan(sample_weights).any() and not torch.isinf(sample_weights).any():
+                    # Apply individual sample weights
+                    loss_bbox = loss_bbox * sample_weights
+                    # Sum weighted losses
+                    losses['loss_bbox_relation'] = loss_bbox.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_bbox.sum()
+                else:
+                    losses['loss_bbox_relation'] = loss_bbox.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_bbox.sum()
+            else:
+                losses['loss_bbox_relation'] = loss_bbox.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_bbox.sum()
 
             loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(
                 box_ops.box_cxcywh_to_xyxy(src_boxes),
                 box_ops.box_cxcywh_to_xyxy(target_boxes)))
-            losses['loss_giou_relation'] = loss_giou.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_giou.sum()
+            
+            # Apply loss weights to giou loss at individual sample level
+            if loss_weights is not None and len(idx[0]) > 0:
+                batch_indices = idx[0]
+                sample_weights = loss_weights[batch_indices]
+                # Safety check for weights
+                if not torch.isnan(sample_weights).any() and not torch.isinf(sample_weights).any():
+                    # Apply individual sample weights
+                    loss_giou = loss_giou * sample_weights
+                    # Sum weighted losses
+                    losses['loss_giou_relation'] = loss_giou.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_giou.sum()
+                else:
+                    losses['loss_giou_relation'] = loss_giou.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_giou.sum()
+            else:
+                losses['loss_giou_relation'] = loss_giou.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_giou.sum()
 
         else:
             losses['loss_bbox_relation'] = (outputs['relation_boxes'] * 0.0).sum()
@@ -560,6 +763,17 @@ class IterativeRelationCriterion(IterativeRelationCriterionBase):
         device = next(iter(outputs.values())).device
         losses = {}
 
+        # Extract loss weights from targets
+        loss_weights = []
+        for target in targets:
+            if 'loss_weight' in target:
+                loss_weights.append(target['loss_weight'])
+            else:
+                loss_weights.append(1.0)  # Default weight
+        
+        # Convert to tensor
+        loss_weights = torch.tensor(loss_weights, device=device, dtype=torch.float32)
+
         n_layers = 1 + len(outputs['aux_outputs_r'])
 
         # Relation  Branch
@@ -574,14 +788,14 @@ class IterativeRelationCriterion(IterativeRelationCriterionBase):
         # Losses
         entity_targets = [{'boxes': x['combined_boxes'], 'labels': x['combined_labels']} for x in augmented_targets]
         relation_targets = [{'boxes': x['relation_boxes'], 'labels': x['relation_labels']} for x in augmented_targets]
-        kwargs = {'aux_loss' : False}
+        kwargs = {'aux_loss' : False, 'loss_weights': loss_weights}
         losses.update(self.get_relation_losses(relation_outputs_without_aux, entity_targets, relation_targets, combined_indices, **kwargs))
         if 'aux_outputs_r' in outputs:
             for i, (aux_outputs_r, aux_outputs_r_sub, aux_outputs_r_obj) in enumerate(zip(outputs['aux_outputs_r'], outputs['aux_outputs_r_sub'], outputs['aux_outputs_r_obj'])):
                 relation_aux_outputs = {'relation_logits': aux_outputs_r['pred_logits'], 'relation_boxes': aux_outputs_r['pred_boxes'],
                                         'relation_subject_logits': aux_outputs_r_sub['pred_logits'], 'relation_subject_boxes': aux_outputs_r_sub['pred_boxes'],
                                         'relation_object_logits': aux_outputs_r_obj['pred_logits'], 'relation_object_boxes': aux_outputs_r_obj['pred_boxes']}
-                kwargs = {'log': False, 'aux_loss' : True}
+                kwargs = {'log': False, 'aux_loss' : True, 'loss_weights': loss_weights}
                 if self.match_independent:
                     combined_indices, k_mean_log, augmented_targets = self.matcher.forward_relation(relation_aux_outputs, targets, layer_num=i + 1)
                     entity_targets = [{'boxes': x['combined_boxes'], 'labels': x['combined_labels']} for x in augmented_targets]
