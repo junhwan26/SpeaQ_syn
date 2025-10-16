@@ -60,7 +60,7 @@ Thumbs.db
 
 # Detectron2 specific
 outputs/
-
+plots/
 # Dataset files (too large for git)
 datasets/
 *.h5

@@ -44,7 +44,8 @@ def parse_log_file(log_path):
         'sg_mean_recall_100': [],
         'sg_recall_20': [],
         'sg_recall_50': [],
-        'sg_recall_100': []
+        'sg_recall_100': [],
+        'recall_per_predicate': {}  # {'predicate_name': {'R@20': [], 'R@50': [], 'R@100': []}}
     }
     
     print(f"Parsing log file: {log_path}")
@@ -123,7 +124,151 @@ def parse_log_file(log_path):
         val_data['sg_recall_50'].append(sg_metrics[4])
         val_data['sg_recall_100'].append(sg_metrics[5])
     
+    # Extract recall per predicate
+    # Pattern to find recall_per_class sections with iteration context
+    recall_block_pattern = r'iter: (\d+).*?recall_per_class\s*\nR @ 20\s*\n(.*?)\nR @ 50\s*\n(.*?)\nR @ 100\s*\n(.*?)\n={50,}'
+    
+    recall_matches = re.findall(recall_block_pattern, content, re.DOTALL)
+    print(f"Found {len(recall_matches)} recall_per_class evaluations")
+    
+    for match in recall_matches:
+        iteration = int(match[0])
+        recall_20_str = match[1].strip()
+        recall_50_str = match[2].strip()
+        recall_100_str = match[3].strip()
+        
+        # Parse recall@20 - improved pattern to capture all predicates including multi-word ones
+        recall_20_items = re.findall(r'([\w\s]+?):\s+([\d.]+|nan);', recall_20_str)
+        recall_50_items = re.findall(r'([\w\s]+?):\s+([\d.]+|nan);', recall_50_str)
+        recall_100_items = re.findall(r'([\w\s]+?):\s+([\d.]+|nan);', recall_100_str)
+        
+        # Store recall per predicate
+        for pred_name, value_str in recall_20_items:
+            pred_name = pred_name.strip()
+            if pred_name not in val_data['recall_per_predicate']:
+                val_data['recall_per_predicate'][pred_name] = {
+                    'iterations': [],
+                    'R@20': [],
+                    'R@50': [],
+                    'R@100': []
+                }
+            
+            # Only append if this iteration hasn't been added yet for this predicate
+            if not val_data['recall_per_predicate'][pred_name]['iterations'] or \
+               val_data['recall_per_predicate'][pred_name]['iterations'][-1] != iteration:
+                val_data['recall_per_predicate'][pred_name]['iterations'].append(iteration)
+                
+                # Parse R@20
+                try:
+                    val_data['recall_per_predicate'][pred_name]['R@20'].append(float(value_str))
+                except:
+                    val_data['recall_per_predicate'][pred_name]['R@20'].append(0.0)
+        
+        # Parse R@50 and R@100
+        for pred_name, value_str in recall_50_items:
+            pred_name = pred_name.strip()
+            if pred_name in val_data['recall_per_predicate']:
+                try:
+                    val_data['recall_per_predicate'][pred_name]['R@50'].append(float(value_str))
+                except:
+                    val_data['recall_per_predicate'][pred_name]['R@50'].append(0.0)
+        
+        for pred_name, value_str in recall_100_items:
+            pred_name = pred_name.strip()
+            if pred_name in val_data['recall_per_predicate']:
+                try:
+                    val_data['recall_per_predicate'][pred_name]['R@100'].append(float(value_str))
+                except:
+                    val_data['recall_per_predicate'][pred_name]['R@100'].append(0.0)
+    
     return train_data, val_data
+
+def plot_recall_per_predicate(recall_per_predicate, output_dir='./training_plots'):
+    """Plot recall trends for each predicate"""
+    
+    if not recall_per_predicate:
+        print("No recall_per_predicate data to plot")
+        return
+    
+    # Filter predicates with valid data points (keep all predicates including zeros)
+    valid_predicates = {}
+    for pred_name, data in recall_per_predicate.items():
+        if data['iterations'] and len(data['iterations']) > 0:
+            valid_predicates[pred_name] = data
+    
+    if not valid_predicates:
+        print("No valid predicate data to plot")
+        return
+    
+    print(f"Plotting recall for all {len(valid_predicates)} predicates")
+    
+    # Sort predicates by final R@100 value (descending)
+    sorted_predicates = sorted(valid_predicates.items(), 
+                               key=lambda x: x[1]['R@100'][-1] if x[1]['R@100'] else 0, 
+                               reverse=True)
+    
+    # Plot 1: ALL predicates recall trends (sorted by R@100)
+    n_predicates = len(sorted_predicates)
+    
+    # Calculate grid size to fit all predicates
+    n_cols = 5
+    n_rows = (n_predicates + n_cols - 1) // n_cols  # Ceiling division
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(24, 4*n_rows))
+    axes = axes.flatten()
+    
+    for idx, (pred_name, data) in enumerate(sorted_predicates):
+        ax = axes[idx]
+        ax.plot(data['iterations'], data['R@20'], 'o-', label='R@20', linewidth=2, markersize=4)
+        ax.plot(data['iterations'], data['R@50'], 's-', label='R@50', linewidth=2, markersize=4)
+        ax.plot(data['iterations'], data['R@100'], '^-', label='R@100', linewidth=2, markersize=4)
+        ax.set_title(f'{pred_name}', fontsize=10, fontweight='bold')
+        ax.set_xlabel('Iteration', fontsize=8)
+        ax.set_ylabel('Recall', fontsize=8)
+        ax.legend(fontsize=7)
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(labelsize=7)
+        ax.set_ylim(0, 1)
+    
+    # Hide unused subplots
+    for idx in range(n_predicates, len(axes)):
+        axes[idx].axis('off')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'recall_per_predicate_all.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"  -> Saved all {n_predicates} predicates to recall_per_predicate_all.png")
+    
+    # Removed individual per-predicate file saving
+    
+    # Plot 2: All predicates R@100 comparison (final values)
+    fig, ax = plt.subplots(1, 1, figsize=(16, 10))
+    
+    pred_names = [pred_name for pred_name, _ in sorted_predicates]
+    final_r100 = [data['R@100'][-1] if data['R@100'] else 0 for _, data in sorted_predicates]
+    
+    y_pos = np.arange(len(pred_names))
+    bars = ax.barh(y_pos, final_r100, alpha=0.7)
+    
+    # Color bars by value
+    colors = plt.cm.RdYlGn(np.array(final_r100) / max(final_r100) if max(final_r100) > 0 else np.array(final_r100))
+    for bar, color in zip(bars, colors):
+        bar.set_color(color)
+    
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(pred_names, fontsize=8)
+    ax.set_xlabel('Final Recall@100', fontsize=12, fontweight='bold')
+    ax.set_title('Final Recall@100 per Predicate (Sorted)', fontsize=14, fontweight='bold')
+    ax.grid(True, axis='x', alpha=0.3)
+    ax.set_xlim(0, 1)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'recall_per_predicate_final_r100.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Removed important predicates plot generation
+    
+    print(f"Recall per predicate plots saved to: {output_dir}")
 
 def plot_training_curves(train_data, val_data, output_dir='./training_plots'):
     """Create comprehensive training visualization plots"""
@@ -265,7 +410,6 @@ def plot_training_curves(train_data, val_data, output_dir='./training_plots'):
         ax1.set_ylabel('Mean Recall')
         ax1.legend()
         ax1.grid(True, alpha=0.3)
-        
         # Set y-axis range to show more detail for Mean Recall
         all_mean_recall_values = (val_data['sg_mean_recall_20'] + val_data['sg_mean_recall_50'] + 
                                  val_data['sg_mean_recall_100'])
@@ -282,7 +426,6 @@ def plot_training_curves(train_data, val_data, output_dir='./training_plots'):
         ax2.set_ylabel('Recall')
         ax2.legend()
         ax2.grid(True, alpha=0.3)
-        
         # Set y-axis range to show more detail for Recall
         all_recall_values = (val_data['sg_recall_20'] + val_data['sg_recall_50'] + 
                             val_data['sg_recall_100'])
@@ -307,10 +450,16 @@ def plot_training_curves(train_data, val_data, output_dir='./training_plots'):
         ax.set_ylabel('Score', fontsize=12)
         ax.legend(fontsize=12)
         ax.grid(True, alpha=0.3)
+        # Keep combined plot fixed to [0,1] for absolute comparison
+        ax.set_ylim(0, 1)
         
         plt.tight_layout()
         plt.savefig(os.path.join(output_dir, 'combined_validation_metrics.png'), dpi=300, bbox_inches='tight')
         plt.close()
+    
+    # 6. Recall Per Predicate Plots
+    if val_data['recall_per_predicate']:
+        plot_recall_per_predicate(val_data['recall_per_predicate'], output_dir)
     
     print(f"Training plots saved to: {output_dir}")
 
