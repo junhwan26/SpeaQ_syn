@@ -181,6 +181,56 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python train_iterative_model.py \
     SOLVER.IMS_PER_BATCH 20
 ```
 
+## Dataset Analysis and Visualization
+
+### Predicate Distribution Analysis
+
+Analyze and visualize the distribution of predicates (relations) in both real and synthetic datasets:
+
+#### Using Config File (Recommended)
+```bash
+# Multi-dataset analysis
+python visualize_predicate_distribution.py \
+    --config-file configs/speaq_multi_dataset.yaml \
+    --output-dir predicate_analysis
+
+# Synthetic-only analysis
+python visualize_predicate_distribution.py \
+    --config-file configs/synthetic_genome.yaml \
+    --output-dir synthetic_predicate_analysis
+```
+
+#### Using Manual Paths
+```bash
+python visualize_predicate_distribution.py \
+    --real-mapping /home/dataset/vg/VG-SGG-dicts-with-attri.json \
+    --real-h5 /home/dataset/vg/VG-SGG-with-attri.h5 \
+    --synthetic-mapping /home/dataset/vg/VG-SGG-dicts-with-attri.json \
+    --synthetic-h5 /home/junhwanheo/DA-SGG/datasets/generated/augmented_from_refined.h5 \
+    --output-dir predicate_analysis
+```
+
+This will generate the following visualizations:
+
+- **`top_predicates_comparison.png`**: Top 20 predicates in each dataset
+- **`predicate_distribution_comparison.png`**: Side-by-side comparison of all predicates
+- **`cumulative_predicate_distribution.png`**: Cumulative distribution curves
+- **`predicate_statistics_summary.png`**: Comprehensive statistics overview
+
+### Training Progress Visualization
+
+Visualize training progress and loss curves:
+
+```bash
+python vis_train_log.py --log-file outputs/multi_dataset_training/log.txt
+```
+
+This generates training plots including:
+- Loss components over time
+- Validation metrics
+- Learning rate schedules
+- Model performance trends
+
 ## Parameter Descriptions
 
 ### Dataset Parameters

@@ -262,6 +262,7 @@ class SceneGraphEvaluator(DatasetEvaluator):
         torch.save(self._evaluators['SGRecall'].result_dict, 'temp.pth')
         self._logger.info('Scene Graph Results for mode: {}'.format(self._mode))
         print(result_str)
+        self._logger.info(result_str)
         ret = OrderedDict()
         for k, v in self._evaluators['SGMeanRecall'].result_dict[self._mode + '_mean_recall'].items():
             ret['SGMeanRecall@{}'.format(k)] = float(v)
