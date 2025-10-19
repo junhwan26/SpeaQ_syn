@@ -21,6 +21,7 @@ import pathlib
 from shutil import copyfile
 
 parser = default_argument_parser()
+parser.add_argument('--validate-first', action='store_true', help='Run validation once immediately after loading checkpoint, before training')
 
 def backup_source_codes(cfg):
     if comm.is_main_process():
@@ -75,6 +76,9 @@ def main(args):
     backup_source_codes(cfg)
     trainer = JointTransformerTrainer(cfg)
     trainer.resume_or_load(resume=args.resume)
+    # Optionally run a validation pass before training starts (useful when resuming)
+    if args.validate_first:
+        JointTransformerTrainer.test(cfg, trainer.model)
     return trainer.train()
 
 if __name__ == '__main__':
