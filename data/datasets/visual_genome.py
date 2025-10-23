@@ -9,6 +9,7 @@ import torch
 import numpy as np
 import pickle
 import yaml
+import hashlib
 from detectron2.config import get_cfg
 from detectron2.structures import Instances, Boxes, pairwise_iou, BoxMode
 from detectron2.data import DatasetCatalog, MetadataCatalog
@@ -108,14 +109,17 @@ class VisualGenomeTrainData:
             MetadataCatalog.get('VG_{}'.format(self.split)).set(statistics=statistics) 
             print (self.idx_to_predicates, statistics['fg_rel_count'].numpy().tolist())
 
-    def register_dataset(self, dataloader=False):
+    def register_dataset(self, dataloader=False, dataset_name=None):
         """
         Register datasets to use with Detectron2
         """
+        if dataset_name is None:
+            dataset_name = 'VG_{}'.format(self.split)
+        
         if not dataloader:
-            DatasetCatalog.register('VG_{}'.format(self.split), lambda: self.dataset_dicts)
+            DatasetCatalog.register(dataset_name, lambda: self.dataset_dicts)
         else:    
-            DatasetCatalog.register('VG_{}'.format(self.split), lambda: self.dataloader)            
+            DatasetCatalog.register(dataset_name, lambda: self.dataloader)            
             
         #Get labels
         self.mapping_dictionary = json.load(open(self.cfg.DATASETS.VISUAL_GENOME.MAPPING_DICTIONARY, 'r'))
@@ -128,7 +132,20 @@ class VisualGenomeTrainData:
         """
         Load data in detectron format
         """
-        fileName = "tmp/visual_genome_{}_data_{}{}{}{}{}{}{}{}.pkl".format(self.split, 'masks' if self.mask_exists else '', '_oi' if 'oi' in self.mask_location else '', "_clamped" if self.clamped else "", "_precomp" if self.precompute else "", "_clipped" if self.clipped else "", '_overlapfalse' if not self.cfg.DATASETS.VISUAL_GENOME.FILTER_NON_OVERLAP else "", '_emptyfalse' if not self.cfg.DATASETS.VISUAL_GENOME.FILTER_EMPTY_RELATIONS else '', "_perclass" if self.per_class_dataset else '')
+        # Include H5 file path in filename to avoid conflicts between real and synthetic datasets
+        h5_path_hash = hashlib.md5(self.cfg.DATASETS.VISUAL_GENOME.VG_ATTRIBUTE_H5.encode()).hexdigest()[:8]
+        fileName = "tmp/visual_genome_{}_data_{}{}{}{}{}{}{}{}_{}.pkl".format(
+            self.split, 
+            'masks' if self.mask_exists else '', 
+            '_oi' if 'oi' in self.mask_location else '', 
+            "_clamped" if self.clamped else "", 
+            "_precomp" if self.precompute else "", 
+            "_clipped" if self.clipped else "", 
+            '_overlapfalse' if not self.cfg.DATASETS.VISUAL_GENOME.FILTER_NON_OVERLAP else "", 
+            '_emptyfalse' if not self.cfg.DATASETS.VISUAL_GENOME.FILTER_EMPTY_RELATIONS else '', 
+            "_perclass" if self.per_class_dataset else '',
+            h5_path_hash
+        )
         print("Loading file: ", fileName)
         if os.path.isfile(fileName):
             #If data has been processed earlier, load that to save time
@@ -153,7 +170,9 @@ class VisualGenomeTrainData:
             if str(img['image_id']) in self.corrupted_ims:
                 continue
             self.image_data.append(img)
-        assert(len(self.image_data) == 108073)
+        # Remove strict assertion for synthetic datasets
+        # assert(len(self.image_data) == 108073)
+        print(f"Loaded {len(self.image_data)} images from {self.cfg.DATASETS.VISUAL_GENOME.VG_ATTRIBUTE_H5}")
         self.masks = None
         if self.mask_location != "":
             try:
