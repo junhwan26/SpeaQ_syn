@@ -73,7 +73,7 @@ def main(args):
         # if comm.is_main_process():
         #     verify_results(cfg, res)
         return res
-    backup_source_codes(cfg)
+    # backup_source_codes(cfg)  # Disabled automatic code backup
     trainer = JointTransformerTrainer(cfg)
     trainer.resume_or_load(resume=args.resume)
     # Optionally run a validation pass before training starts (useful when resuming)

@@ -57,19 +57,19 @@ DATASETS:
     FILTER_EMPTY_RELATIONS: True
     FILTER_NON_OVERLAP: False
     FILTER_DUPLICATE_RELATIONS: True
-    IMAGES: '/home/dataset/vg/VG_100K'
+    IMAGES: '/home/dataset/vg_syn/flux_mR_aware_generated/01/'
     MAPPING_DICTIONARY: '/home/dataset/vg/VG-SGG-dicts-with-attri.json'
-    IMAGE_DATA: '/home/junhwanheo/DA-SGG/datasets/generated/image_data_new.json'
-    VG_ATTRIBUTE_H5: '/home/junhwanheo/DA-SGG/datasets/generated/augmented_from_refined.h5'
+    IMAGE_DATA: '/home/junhwanheo/DA-SGG/datasets/generated/image_data_refined_synthetic_only.json'
+    VG_ATTRIBUTE_H5: '/home/junhwanheo/DA-SGG/datasets/generated/VG-SGG-with-attri-refined-synthetic_only.h5'
   MULTI_DATASET:
     ENABLED: True
-    REAL_SAMPLING_RATIO: 0.5
-    SYNTHETIC_SAMPLING_RATIO: 0.5
+    REAL_SAMPLING_RATIO: 0.8
+    SYNTHETIC_SAMPLING_RATIO: 0.2
     REAL_LOSS_WEIGHT: 1.0
-    SYNTHETIC_LOSS_WEIGHT: 0.5
+    SYNTHETIC_LOSS_WEIGHT: 1.0
 SOLVER:
-  IMS_PER_BATCH: 20
-  BASE_LR: 0.0001
+  IMS_PER_BATCH: 10
+  BASE_LR: 0.00001
   STEPS: (96000,)
   MAX_ITER: 150000
   WARMUP_FACTOR: 1.0

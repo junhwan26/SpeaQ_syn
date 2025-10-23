@@ -165,8 +165,12 @@ class VisualGenomeTrainData:
         return dataset_dicts
 
     def get_statistics(self, eps=1e-3, bbox_overlap=True):
-        num_object_classes = len(MetadataCatalog.get('VG_{}'.format(self.split)).thing_classes) + 1
-        num_relation_classes = len(MetadataCatalog.get('VG_{}'.format(self.split)).predicate_classes) + 1
+        try:
+            num_object_classes = len(MetadataCatalog.get('VG_{}'.format(self.split)).thing_classes) + 1
+            num_relation_classes = len(MetadataCatalog.get('VG_{}'.format(self.split)).predicate_classes) + 1
+        except Exception as e:
+            print(f"Error getting metadata for VG_{self.split}: {e}")
+            raise e
         
         fg_matrix = np.zeros((num_object_classes, num_object_classes, num_relation_classes), dtype=np.int64)
         bg_matrix = np.zeros((num_object_classes, num_object_classes), dtype=np.int64)
@@ -179,8 +183,33 @@ class VisualGenomeTrainData:
                 fg_matrix[o1, o2, rel] += 1
                 fg_rel_count[rel] += 1
 
-            for (o1, o2) in gt_classes[np.array(box_filter(gt_boxes, must_overlap=bbox_overlap), dtype=int)]:
-                bg_matrix[o1, o2] += 1
+            try:
+                # Simple box overlap filter implementation
+                if bbox_overlap and len(gt_boxes) > 1:
+                    # Calculate pairwise IoU to find overlapping boxes
+                    from detectron2.structures import pairwise_iou, Boxes
+                    boxes = Boxes(gt_boxes)
+                    iou_matrix = pairwise_iou(boxes, boxes)
+                    
+                    # Find pairs of boxes that overlap (IoU > 0)
+                    overlap_pairs = []
+                    for i in range(len(gt_boxes)):
+                        for j in range(i+1, len(gt_boxes)):
+                            if iou_matrix[i, j] > 0:
+                                overlap_pairs.append((i, j))
+                    
+                    # Update background matrix for overlapping pairs
+                    for (i, j) in overlap_pairs:
+                        bg_matrix[gt_classes[i], gt_classes[j]] += 1
+                else:
+                    # If no overlap required, use all possible pairs
+                    for i in range(len(gt_classes)):
+                        for j in range(i+1, len(gt_classes)):
+                            bg_matrix[gt_classes[i], gt_classes[j]] += 1
+            except Exception as e:
+                print(f"Error in background matrix calculation: {e}")
+                # Skip background matrix calculation if there's an error
+                pass
         bg_matrix += 1
         fg_matrix[:, :, -1] = bg_matrix
         pred_dist = np.log(fg_matrix / fg_matrix.sum(2)[:, :, None] + eps)

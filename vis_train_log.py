@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 Visualize training logs from SpeaQ model training
@@ -101,8 +102,9 @@ def parse_log_file(log_path):
     val_matches = re.findall(val_block_pattern, content, re.DOTALL)
     print(f"Found {len(val_matches)} validation evaluations")
     
-    for match in val_matches:
-        iteration = int(match[0])
+    for eval_idx, match in enumerate(val_matches):
+        # Evaluation happens every 6000 iterations, starting at iteration 6000
+        iteration = (eval_idx + 1) * 6000
         bbox_metrics_str = match[1]
         sg_metrics_str = match[2]
         
@@ -131,8 +133,9 @@ def parse_log_file(log_path):
     recall_matches = re.findall(recall_block_pattern, content, re.DOTALL)
     print(f"Found {len(recall_matches)} recall_per_class evaluations")
     
-    for match in recall_matches:
-        iteration = int(match[0])
+    for eval_idx, match in enumerate(recall_matches):
+        # Evaluation happens every 6000 iterations, starting at iteration 6000
+        iteration = (eval_idx + 1) * 6000
         recall_20_str = match[1].strip()
         recall_50_str = match[2].strip()
         recall_100_str = match[3].strip()
@@ -202,12 +205,34 @@ def plot_recall_per_predicate(recall_per_predicate, output_dir='./training_plots
     
     print(f"Plotting recall for all {len(valid_predicates)} predicates")
     
-    # Sort predicates by final R@100 value (descending)
-    sorted_predicates = sorted(valid_predicates.items(), 
-                               key=lambda x: x[1]['R@100'][-1] if x[1]['R@100'] else 0, 
-                               reverse=True)
+    # Define fixed predicate ordering to ensure consistent positions
+    # This list is based on the actual predicate order from the log files
+    fixed_predicate_order = [
+        'above', 'across', 'against', 'along', 'and', 'at', 'attached to', 'behind', 
+        'belonging to', 'between', 'carrying', 'covered in', 'covering', 'eating', 
+        'flying in', 'for', 'from', 'growing on', 'hanging from', 'has', 'holding', 
+        'in', 'in front of', 'laying on', 'looking at', 'lying on', 'made of', 
+        'mounted on', 'near', 'of', 'on', 'on back of', 'over', 'painted on', 
+        'parked on', 'part of', 'playing', 'riding', 'says', 'sitting on', 
+        'standing on', 'to', 'under', 'using', 'walking in', 'walking on', 
+        'watching', 'wearing', 'wears', 'with'
+    ]
     
-    # Plot 1: ALL predicates recall trends (sorted by R@100)
+    # Create ordered list of predicates using fixed ordering
+    # First, add predicates in the fixed order if they exist in valid_predicates
+    ordered_predicates = []
+    for pred_name in fixed_predicate_order:
+        if pred_name in valid_predicates:
+            ordered_predicates.append((pred_name, valid_predicates[pred_name]))
+    
+    # Then, add any remaining predicates that weren't in the fixed order
+    for pred_name, data in valid_predicates.items():
+        if pred_name not in fixed_predicate_order:
+            ordered_predicates.append((pred_name, data))
+    
+    sorted_predicates = ordered_predicates
+    
+    # Plot 1: ALL predicates recall trends (fixed ordering)
     n_predicates = len(sorted_predicates)
     
     # Calculate grid size to fit all predicates
@@ -222,13 +247,24 @@ def plot_recall_per_predicate(recall_per_predicate, output_dir='./training_plots
         ax.plot(data['iterations'], data['R@20'], 'o-', label='R@20', linewidth=2, markersize=4)
         ax.plot(data['iterations'], data['R@50'], 's-', label='R@50', linewidth=2, markersize=4)
         ax.plot(data['iterations'], data['R@100'], '^-', label='R@100', linewidth=2, markersize=4)
+        
+        # Add value annotations
+        for i, (x, y) in enumerate(zip(data['iterations'], data['R@20'])):
+            ax.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 3), textcoords='offset points',
+                       fontsize=5, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(data['iterations'], data['R@50'])):
+            ax.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 3), textcoords='offset points',
+                       fontsize=5, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(data['iterations'], data['R@100'])):
+            ax.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 3), textcoords='offset points',
+                       fontsize=5, ha='center', va='bottom')
+        
         ax.set_title(f'{pred_name}', fontsize=10, fontweight='bold')
         ax.set_xlabel('Iteration', fontsize=8)
         ax.set_ylabel('Recall', fontsize=8)
         ax.legend(fontsize=7)
         ax.grid(True, alpha=0.3)
         ax.tick_params(labelsize=7)
-        ax.set_ylim(0, 1)
     
     # Hide unused subplots
     for idx in range(n_predicates, len(axes)):
@@ -239,7 +275,40 @@ def plot_recall_per_predicate(recall_per_predicate, output_dir='./training_plots
     plt.close()
     print(f"  -> Saved all {n_predicates} predicates to recall_per_predicate_all.png")
     
-    # Removed individual per-predicate file saving
+    # Plot 1.5: Save each predicate as individual file
+    individual_dir = os.path.join(output_dir, 'per_predicate')
+    os.makedirs(individual_dir, exist_ok=True)
+    
+    for pred_name, data in sorted_predicates:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+        
+        ax.plot(data['iterations'], data['R@20'], 'o-', label='R@20', linewidth=2.5, markersize=6, color='#1f77b4')
+        ax.plot(data['iterations'], data['R@50'], 's-', label='R@50', linewidth=2.5, markersize=6, color='#ff7f0e')
+        ax.plot(data['iterations'], data['R@100'], '^-', label='R@100', linewidth=2.5, markersize=6, color='#2ca02c')
+        
+        # Add value annotations on all points
+        for i, (x, y) in enumerate(zip(data['iterations'], data['R@20'])):
+            ax.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                       fontsize=7, ha='center', va='bottom', color='#1f77b4')
+        for i, (x, y) in enumerate(zip(data['iterations'], data['R@50'])):
+            ax.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                       fontsize=7, ha='center', va='bottom', color='#ff7f0e')
+        for i, (x, y) in enumerate(zip(data['iterations'], data['R@100'])):
+            ax.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                       fontsize=7, ha='center', va='bottom', color='#2ca02c')
+        
+        ax.set_title(f'Recall Trend: {pred_name}', fontsize=14, fontweight='bold')
+        ax.set_xlabel('Iteration', fontsize=12)
+        ax.set_ylabel('Recall', fontsize=12)
+        ax.legend(fontsize=11, loc='best')
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        safe_filename = pred_name.replace(' ', '_').replace('/', '_')
+        plt.savefig(os.path.join(individual_dir, f'{safe_filename}.png'), dpi=200, bbox_inches='tight')
+        plt.close()
+    
+    print(f"  -> Saved {n_predicates} individual predicate plots to {individual_dir}/")
     
     # Plot 2: All predicates R@100 comparison (final values)
     fig, ax = plt.subplots(1, 1, figsize=(16, 10))
@@ -258,15 +327,67 @@ def plot_recall_per_predicate(recall_per_predicate, output_dir='./training_plots
     ax.set_yticks(y_pos)
     ax.set_yticklabels(pred_names, fontsize=8)
     ax.set_xlabel('Final Recall@100', fontsize=12, fontweight='bold')
-    ax.set_title('Final Recall@100 per Predicate (Sorted)', fontsize=14, fontweight='bold')
+    ax.set_title('Final Recall@100 per Predicate (Fixed Order)', fontsize=14, fontweight='bold')
     ax.grid(True, axis='x', alpha=0.3)
-    ax.set_xlim(0, 1)
     
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, 'recall_per_predicate_final_r100.png'), dpi=300, bbox_inches='tight')
     plt.close()
     
-    # Removed important predicates plot generation
+    # Plot 3: Selected important predicates (on, in, has, wearing, etc.)
+    important_predicates = ['on', 'has', 'in', 'wearing', 'of', 'near', 'with', 'holding', 
+                           'at', 'behind', 'riding', 'carrying', 'eating', 'sitting on', 
+                           'standing on', 'walking on']
+    
+    available_important = [(name, data) for name, data in valid_predicates.items() 
+                          if name in important_predicates]
+    
+    if available_important:
+        n_preds = len(available_important)
+        n_rows = (n_preds + 3) // 4
+        n_cols = min(4, n_preds)
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, 5*n_rows))
+        if n_rows == 1 and n_cols == 1:
+            axes = [axes]
+        elif n_rows == 1 or n_cols == 1:
+            axes = axes.flatten()
+        else:
+            axes = axes.flatten()
+        
+        for idx, (pred_name, data) in enumerate(available_important):
+            if idx >= len(axes):
+                break
+            
+            ax = axes[idx]
+            ax.plot(data['iterations'], data['R@20'], 'o-', label='R@20', linewidth=2, markersize=5)
+            ax.plot(data['iterations'], data['R@50'], 's-', label='R@50', linewidth=2, markersize=5)
+            ax.plot(data['iterations'], data['R@100'], '^-', label='R@100', linewidth=2, markersize=5)
+            
+            # Add value annotations
+            for i, (x, y) in enumerate(zip(data['iterations'], data['R@20'])):
+                ax.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 3), textcoords='offset points',
+                           fontsize=6, ha='center', va='bottom')
+            for i, (x, y) in enumerate(zip(data['iterations'], data['R@50'])):
+                ax.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 3), textcoords='offset points',
+                           fontsize=6, ha='center', va='bottom')
+            for i, (x, y) in enumerate(zip(data['iterations'], data['R@100'])):
+                ax.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 3), textcoords='offset points',
+                           fontsize=6, ha='center', va='bottom')
+            
+            ax.set_title(f'{pred_name}', fontsize=12, fontweight='bold')
+            ax.set_xlabel('Iteration', fontsize=10)
+            ax.set_ylabel('Recall', fontsize=10)
+            ax.legend(fontsize=9)
+            ax.grid(True, alpha=0.3)
+        
+        # Hide unused subplots
+        for idx in range(len(available_important), len(axes)):
+            axes[idx].axis('off')
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, 'recall_per_predicate_important.png'), dpi=300, bbox_inches='tight')
+        plt.close()
     
     print(f"Recall per predicate plots saved to: {output_dir}")
 
@@ -303,6 +424,18 @@ def plot_training_curves(train_data, val_data, output_dir='./training_plots'):
         ax2.plot(val_data['iterations'], val_data['bbox_ap'], 'o-', label='AP', linewidth=2, markersize=4)
         ax2.plot(val_data['iterations'], val_data['bbox_ap50'], 's-', label='AP50', linewidth=2, markersize=4)
         ax2.plot(val_data['iterations'], val_data['bbox_ap75'], '^-', label='AP75', linewidth=2, markersize=4)
+        
+        # Add value annotations
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['bbox_ap'])):
+            ax2.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['bbox_ap50'])):
+            ax2.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['bbox_ap75'])):
+            ax2.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        
         ax2.set_title('Validation BBox Detection Metrics', fontsize=14, fontweight='bold')
         ax2.set_xlabel('Iteration')
         ax2.set_ylabel('AP Score')
@@ -314,6 +447,18 @@ def plot_training_curves(train_data, val_data, output_dir='./training_plots'):
         ax3.plot(val_data['iterations'], val_data['sg_mean_recall_20'], 'o-', label='Mean Recall@20', linewidth=2, markersize=4)
         ax3.plot(val_data['iterations'], val_data['sg_mean_recall_50'], 's-', label='Mean Recall@50', linewidth=2, markersize=4)
         ax3.plot(val_data['iterations'], val_data['sg_mean_recall_100'], '^-', label='Mean Recall@100', linewidth=2, markersize=4)
+        
+        # Add value annotations
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_mean_recall_20'])):
+            ax3.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_mean_recall_50'])):
+            ax3.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_mean_recall_100'])):
+            ax3.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        
         ax3.set_title('Validation Scene Graph Mean Recall', fontsize=14, fontweight='bold')
         ax3.set_xlabel('Iteration')
         ax3.set_ylabel('Mean Recall')
@@ -332,6 +477,18 @@ def plot_training_curves(train_data, val_data, output_dir='./training_plots'):
         ax4.plot(val_data['iterations'], val_data['sg_recall_20'], 'o-', label='Recall@20', linewidth=2, markersize=4)
         ax4.plot(val_data['iterations'], val_data['sg_recall_50'], 's-', label='Recall@50', linewidth=2, markersize=4)
         ax4.plot(val_data['iterations'], val_data['sg_recall_100'], '^-', label='Recall@100', linewidth=2, markersize=4)
+        
+        # Add value annotations
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_recall_20'])):
+            ax4.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_recall_50'])):
+            ax4.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_recall_100'])):
+            ax4.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        
         ax4.set_title('Validation Scene Graph Recall', fontsize=14, fontweight='bold')
         ax4.set_xlabel('Iteration')
         ax4.set_ylabel('Recall')
@@ -405,11 +562,24 @@ def plot_training_curves(train_data, val_data, output_dir='./training_plots'):
         ax1.plot(val_data['iterations'], val_data['sg_mean_recall_20'], 'o-', label='Mean Recall@20', linewidth=2, markersize=4)
         ax1.plot(val_data['iterations'], val_data['sg_mean_recall_50'], 's-', label='Mean Recall@50', linewidth=2, markersize=4)
         ax1.plot(val_data['iterations'], val_data['sg_mean_recall_100'], '^-', label='Mean Recall@100', linewidth=2, markersize=4)
+        
+        # Add value annotations
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_mean_recall_20'])):
+            ax1.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_mean_recall_50'])):
+            ax1.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_mean_recall_100'])):
+            ax1.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        
         ax1.set_title('Validation Scene Graph Mean Recall', fontsize=14, fontweight='bold')
         ax1.set_xlabel('Iteration')
         ax1.set_ylabel('Mean Recall')
         ax1.legend()
         ax1.grid(True, alpha=0.3)
+        
         # Set y-axis range to show more detail for Mean Recall
         all_mean_recall_values = (val_data['sg_mean_recall_20'] + val_data['sg_mean_recall_50'] + 
                                  val_data['sg_mean_recall_100'])
@@ -421,11 +591,24 @@ def plot_training_curves(train_data, val_data, output_dir='./training_plots'):
         ax2.plot(val_data['iterations'], val_data['sg_recall_20'], 'o-', label='Recall@20', linewidth=2, markersize=4)
         ax2.plot(val_data['iterations'], val_data['sg_recall_50'], 's-', label='Recall@50', linewidth=2, markersize=4)
         ax2.plot(val_data['iterations'], val_data['sg_recall_100'], '^-', label='Recall@100', linewidth=2, markersize=4)
+        
+        # Add value annotations
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_recall_20'])):
+            ax2.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_recall_50'])):
+            ax2.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_recall_100'])):
+            ax2.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                        fontsize=7, ha='center', va='bottom')
+        
         ax2.set_title('Validation Scene Graph Recall', fontsize=14, fontweight='bold')
         ax2.set_xlabel('Iteration')
         ax2.set_ylabel('Recall')
         ax2.legend()
         ax2.grid(True, alpha=0.3)
+        
         # Set y-axis range to show more detail for Recall
         all_recall_values = (val_data['sg_recall_20'] + val_data['sg_recall_50'] + 
                             val_data['sg_recall_100'])
@@ -445,13 +628,23 @@ def plot_training_curves(train_data, val_data, output_dir='./training_plots'):
         ax.plot(val_data['iterations'], val_data['bbox_ap'], 'o-', label='BBox AP', linewidth=2, markersize=6)
         ax.plot(val_data['iterations'], val_data['sg_mean_recall_50'], 's-', label='SG Mean Recall@50', linewidth=2, markersize=6)
         ax.plot(val_data['iterations'], val_data['sg_recall_50'], '^-', label='SG Recall@50', linewidth=2, markersize=6)
+        
+        # Add value annotations
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['bbox_ap'])):
+            ax.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                       fontsize=8, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_mean_recall_50'])):
+            ax.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                       fontsize=8, ha='center', va='bottom')
+        for i, (x, y) in enumerate(zip(val_data['iterations'], val_data['sg_recall_50'])):
+            ax.annotate(f'{y:.3f}', xy=(x, y), xytext=(0, 5), textcoords='offset points',
+                       fontsize=8, ha='center', va='bottom')
+        
         ax.set_title('Combined Validation Metrics', fontsize=16, fontweight='bold')
         ax.set_xlabel('Iteration', fontsize=12)
         ax.set_ylabel('Score', fontsize=12)
         ax.legend(fontsize=12)
         ax.grid(True, alpha=0.3)
-        # Keep combined plot fixed to [0,1] for absolute comparison
-        ax.set_ylim(0, 1)
         
         plt.tight_layout()
         plt.savefig(os.path.join(output_dir, 'combined_validation_metrics.png'), dpi=300, bbox_inches='tight')
