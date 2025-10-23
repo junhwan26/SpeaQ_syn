@@ -223,7 +223,17 @@ class VisualGenomeTrainData:
             'att_classes': self.idx_to_attributes,
         }
         print (torch.from_numpy(fg_rel_count).float())
-        MetadataCatalog.get('VG_{}'.format(self.split)).set(statistics=result)
+        
+        # Avoid metadata conflicts by checking if statistics already exist
+        try:
+            metadata = MetadataCatalog.get('VG_{}'.format(self.split))
+            if not hasattr(metadata, 'statistics') or metadata.statistics is None:
+                metadata.set(statistics=result)
+            else:
+                print(f"Statistics already exist for VG_{self.split}, skipping set operation")
+        except Exception as e:
+            print(f"Warning: Could not set statistics for VG_{self.split}: {e}")
+            # Continue without setting statistics to avoid conflicts
         return result
 
     def _load_graphs(self):
