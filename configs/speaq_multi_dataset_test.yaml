@@ -38,7 +38,7 @@ MODEL:
 DATASETS:
   TYPE: "MULTI_DATASET"
   TRAIN: ('MULTI_train',)
-  TEST: ('VG_val',)
+  TEST: ('VG_test',)
   VISUAL_GENOME:
     TRAIN_MASKS: ""
     VAL_MASKS: ""

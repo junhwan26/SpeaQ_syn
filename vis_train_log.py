@@ -334,10 +334,11 @@ def plot_recall_per_predicate(recall_per_predicate, output_dir='./training_plots
     plt.savefig(os.path.join(output_dir, 'recall_per_predicate_final_r100.png'), dpi=300, bbox_inches='tight')
     plt.close()
     
-    # Plot 3: Selected important predicates (on, in, has, wearing, etc.)
-    important_predicates = ['on', 'has', 'in', 'wearing', 'of', 'near', 'with', 'holding', 
-                           'at', 'behind', 'riding', 'carrying', 'eating', 'sitting on', 
-                           'standing on', 'walking on']
+    # Plot 3: Selected important predicates (watching, walking in, says, playing, etc.)
+    important_predicates = ['watching', 'walking in', 'says', 'playing', 'part of', 'painted on', 
+                           'mounted on', 'made of', 'growing on', 'from', 'for', 'between', 'and', 
+                           'against', 'over', 'attached to', 'covered in', 'along', 'on back of', 
+                           'across', 'covering', 'looking at', 'behind', 'under']
     
     available_important = [(name, data) for name, data in valid_predicates.items() 
                           if name in important_predicates]

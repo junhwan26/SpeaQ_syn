@@ -260,7 +260,12 @@ class VisualGenomeTrainData:
         Parse examples and create dictionaries
         """
         data_split = self.VG_attribute_h5['split'][:]
-        split_flag = 2 if self.split == 'test' else 0
+        if self.split == 'test':
+            split_flag = 2
+        elif self.split == 'val':
+            split_flag = 1
+        else:  # train
+            split_flag = 0
         split_mask = data_split == split_flag
         
         #Filter images without bounding boxes
@@ -269,10 +274,11 @@ class VisualGenomeTrainData:
             split_mask &= self.VG_attribute_h5['img_to_first_rel'][:] >= 0
         image_index = np.where(split_mask)[0]
         
-        if self.split == 'val':
-            image_index = image_index[:self.cfg.DATASETS.VISUAL_GENOME.NUMBER_OF_VALIDATION_IMAGES]
-        elif self.split == 'train':
-            image_index = image_index[self.cfg.DATASETS.VISUAL_GENOME.NUMBER_OF_VALIDATION_IMAGES:]
+        # No need to limit validation set size since we're using split_flag=1 for validation
+        # if self.split == 'val':
+        #     image_index = image_index[:self.cfg.DATASETS.VISUAL_GENOME.NUMBER_OF_VALIDATION_IMAGES]
+        # elif self.split == 'train':
+        #     image_index = image_index[self.cfg.DATASETS.VISUAL_GENOME.NUMBER_OF_VALIDATION_IMAGES:]
         
         split_mask = np.zeros_like(data_split).astype(bool)
         split_mask[image_index] = True
