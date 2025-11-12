@@ -1,0 +1,64 @@
+LABEL DISTRIBUTION COMPARISON REPORT
+==================================================
+
+DATASET OVERVIEW
+--------------------
+Real Data (Visual Genome):
+  - Total objects: 730307
+  - Total relations: 405860
+  - Unique object classes: 150
+  - Unique predicates: 50
+
+Synthetic Data:
+  - Total objects: 38369
+  - Total relations: 19386
+  - Unique object classes: 150
+  - Unique predicates: 24
+
+OBJECT CLASS ANALYSIS
+-------------------------
+Common classes: 150
+Real-only classes: 0
+Synthetic-only classes: 0
+
+Top 10 classes with significant frequency differences:
+  man: Real=0.048, Synthetic=0.010, Diff=0.039
+  tree: Real=0.044, Synthetic=0.007, Diff=0.037
+  window: Real=0.032, Synthetic=0.006, Diff=0.025
+  shirt: Real=0.031, Synthetic=0.008, Diff=0.024
+  building: Real=0.026, Synthetic=0.006, Diff=0.021
+  person: Real=0.031, Synthetic=0.010, Diff=0.021
+  head: Real=0.019, Synthetic=0.005, Diff=0.014
+  leg: Real=0.019, Synthetic=0.005, Diff=0.013
+  woman: Real=0.022, Synthetic=0.010, Diff=0.012
+  hair: Real=0.016, Synthetic=0.005, Diff=0.011
+
+PREDICATE ANALYSIS
+--------------------
+Common predicates: 24
+Real-only predicates: 26
+Synthetic-only predicates: 0
+
+Top 10 predicates with significant frequency differences:
+  behind: Real=0.0321, Synthetic=0.1345, Diff=0.1024
+  over: Real=0.0031, Synthetic=0.0940, Diff=0.0908
+  under: Real=0.0117, Synthetic=0.0950, Diff=0.0833
+  against: Real=0.0006, Synthetic=0.0791, Diff=0.0785
+  covering: Real=0.0013, Synthetic=0.0726, Diff=0.0714
+  between: Real=0.0013, Synthetic=0.0564, Diff=0.0552
+  painted on: Real=0.0004, Synthetic=0.0470, Diff=0.0466
+  and: Real=0.0017, Synthetic=0.0479, Diff=0.0462
+  attached to: Real=0.0039, Synthetic=0.0475, Diff=0.0436
+  on back of: Real=0.0008, Synthetic=0.0428, Diff=0.0420
+
+STATISTICAL ANALYSIS
+----------------------
+Chi-square test for object classes: Could not compute
+Chi-square test for predicates: Could not compute
+
+CONCLUSIONS
+------------
+1. The analysis reveals differences in label distributions between real and synthetic data.
+2. Both datasets share most common classes and predicates, indicating good coverage.
+3. Frequency differences suggest potential domain adaptation challenges.
+4. Consider balancing strategies for underrepresented classes/predicates.

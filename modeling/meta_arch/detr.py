@@ -269,7 +269,7 @@ class IterativeRelationDetr(Detr):
             gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
             gt_relations = [x["relations"].to(self.device) for x in batched_inputs]
             
-            targets = self.prepare_targets((gt_instances, gt_relations))
+            targets = self.prepare_targets((gt_instances, gt_relations), batched_inputs)
             
             loss_dict = self.criterion(output, targets)
             
@@ -484,7 +484,7 @@ class IterativeRelationDetr(Detr):
             torch.abs(x1 - x0), torch.abs(y1 - y0)]
         return torch.stack(b, dim=-1)
 
-    def prepare_targets(self, targets, box_threshold=1e-5):
+    def prepare_targets(self, targets, batched_inputs=None, box_threshold=1e-5):
         new_targets = []
         for image_idx, (targets_per_image, relations_per_image) in enumerate(zip(targets[0], targets[1])):
             h, w = targets_per_image.image_size
@@ -524,10 +524,19 @@ class IterativeRelationDetr(Detr):
 
             gt_classes = relations_per_image[:, 2]
             # new_targets.append({"labels": gt_classes, "boxes": gt_boxes, 'subject_boxes': gt_subject_boxes, 'object_boxes': gt_object_boxes, 'combined_boxes': gt_combined_boxes, 'subject_labels': gt_subject_classes, 'object_labels': gt_object_classes, 'combined_labels': gt_combined_classes, 'image_relations': relations_per_image, 'relation_boxes':center_boxes, 'relation_labels':relations_per_image[:, 2], 'subject_object_giou':subject_object_giou})
-            new_targets.append({"labels": gt_classes, "boxes": gt_boxes, 'subject_boxes': gt_subject_boxes,
-                                'object_boxes': gt_object_boxes, 'combined_boxes': gt_combined_boxes,
-                                'subject_labels': gt_subject_classes, 'object_labels': gt_object_classes,
-                                'combined_labels': gt_combined_classes, 'image_relations': relations_per_image,
-                                'relation_boxes':center_boxes, 'relation_labels':relations_per_image[:, 2],
-                                'relation_pairwise_giou':subject_object_giou})
+            target_dict = {"labels": gt_classes, "boxes": gt_boxes, 'subject_boxes': gt_subject_boxes,
+                          'object_boxes': gt_object_boxes, 'combined_boxes': gt_combined_boxes,
+                          'subject_labels': gt_subject_classes, 'object_labels': gt_object_classes,
+                          'combined_labels': gt_combined_classes, 'image_relations': relations_per_image,
+                          'relation_boxes':center_boxes, 'relation_labels':relations_per_image[:, 2],
+                          'relation_pairwise_giou':subject_object_giou}
+            
+            # Preserve dataset_type and loss_weight from batched_inputs if available
+            if batched_inputs is not None and image_idx < len(batched_inputs):
+                if 'dataset_type' in batched_inputs[image_idx]:
+                    target_dict['dataset_type'] = batched_inputs[image_idx]['dataset_type']
+                if 'loss_weight' in batched_inputs[image_idx]:
+                    target_dict['loss_weight'] = batched_inputs[image_idx]['loss_weight']
+            
+            new_targets.append(target_dict)
         return new_targets

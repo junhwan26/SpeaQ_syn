@@ -30,8 +30,14 @@ def parse_log_file(log_path):
         'loss_bbox_object': [],
         'loss_giou_object': [],
         'loss_relation': [],
+        'loss_relation_real': [],
+        'loss_relation_synthetic': [],
         'loss_bbox_relation': [],
+        'loss_bbox_relation_real': [],
+        'loss_bbox_relation_synthetic': [],
         'loss_giou_relation': [],
+        'loss_giou_relation_real': [],
+        'loss_giou_relation_synthetic': [],
         'lr': []
     }
     
@@ -54,46 +60,85 @@ def parse_log_file(log_path):
     with open(log_path, 'r') as f:
         content = f.read()
     
-    # Extract training losses
-    train_matches = re.findall(train_loss_pattern, content)
-    print(f"Found {len(train_matches)} training iterations")
+    # Extract detailed loss components - parse line by line for flexibility
+    # Helper function to extract loss value from line
+    def extract_loss(pattern, line, default=None):
+        match = re.search(pattern, line)
+        if match:
+            try:
+                return float(match.group(1))
+            except:
+                return default
+        return default
     
-    for match in train_matches:
-        iteration = int(match[0])
-        total_loss = float(match[1])
-        train_data['iterations'].append(iteration)
-        train_data['total_loss'].append(total_loss)
+    # Track seen iterations to avoid duplicates
+    seen_iterations = set()
     
-    # Extract detailed loss components (more complex pattern)
-    detailed_loss_pattern = r'iter: (\d+).*?total_loss: ([\d.]+).*?loss_ce_subject: ([\d.]+).*?loss_bbox_subject: ([\d.]+).*?loss_giou_subject: ([\d.]+).*?loss_ce_object: ([\d.]+).*?loss_bbox_object: ([\d.]+).*?loss_giou_object: ([\d.]+).*?loss_relation: ([\d.]+).*?loss_bbox_relation: ([\d.]+).*?loss_giou_relation: ([\d.]+).*?lr: ([\d.e-]+)'
+    lines = content.split('\n')
+    for line in lines:
+        if 'iter:' in line and 'total_loss:' in line and 'loss_relation:' in line:
+            # Extract iteration
+            iter_match = re.search(r'iter: (\d+)', line)
+            if not iter_match:
+                continue
+            iteration = int(iter_match.group(1))
+            
+            # Skip if we've already processed this iteration
+            if iteration in seen_iterations:
+                continue
+            seen_iterations.add(iteration)
+            
+            # Extract total_loss first
+            total_loss = extract_loss(r'total_loss: ([\d.]+)', line)
+            
+            # Extract all loss values
+            loss_ce_subject = extract_loss(r'loss_ce_subject: ([\d.]+)', line)
+            loss_bbox_subject = extract_loss(r'loss_bbox_subject: ([\d.]+)', line)
+            loss_giou_subject = extract_loss(r'loss_giou_subject: ([\d.]+)', line)
+            loss_ce_object = extract_loss(r'loss_ce_object: ([\d.]+)', line)
+            loss_bbox_object = extract_loss(r'loss_bbox_object: ([\d.]+)', line)
+            loss_giou_object = extract_loss(r'loss_giou_object: ([\d.]+)', line)
+            
+            # Relation losses
+            loss_relation = extract_loss(r'loss_relation: ([\d.]+)', line)
+            loss_relation_real = extract_loss(r'loss_relation_real: ([\d.]+)', line)
+            loss_relation_synthetic = extract_loss(r'loss_relation_synthetic: ([\d.]+)', line)
+            
+            # BBox relation losses
+            loss_bbox_relation = extract_loss(r'loss_bbox_relation: ([\d.]+)', line)
+            loss_bbox_relation_real = extract_loss(r'loss_bbox_relation_real: ([\d.]+)', line)
+            loss_bbox_relation_synthetic = extract_loss(r'loss_bbox_relation_synthetic: ([\d.]+)', line)
+            
+            # GIoU relation losses
+            loss_giou_relation = extract_loss(r'loss_giou_relation: ([\d.]+)', line)
+            loss_giou_relation_real = extract_loss(r'loss_giou_relation_real: ([\d.]+)', line)
+            loss_giou_relation_synthetic = extract_loss(r'loss_giou_relation_synthetic: ([\d.]+)', line)
+            
+            # Learning rate
+            lr = extract_loss(r'lr: ([\d.e-]+)', line)
+            
+            # Only append if we have at least basic relation loss
+            if loss_relation is not None:
+                train_data['iterations'].append(iteration)
+                train_data['total_loss'].append(total_loss if total_loss is not None else 0.0)
+                train_data['loss_ce_subject'].append(loss_ce_subject if loss_ce_subject is not None else 0.0)
+                train_data['loss_bbox_subject'].append(loss_bbox_subject if loss_bbox_subject is not None else 0.0)
+                train_data['loss_giou_subject'].append(loss_giou_subject if loss_giou_subject is not None else 0.0)
+                train_data['loss_ce_object'].append(loss_ce_object if loss_ce_object is not None else 0.0)
+                train_data['loss_bbox_object'].append(loss_bbox_object if loss_bbox_object is not None else 0.0)
+                train_data['loss_giou_object'].append(loss_giou_object if loss_giou_object is not None else 0.0)
+                train_data['loss_relation'].append(loss_relation)
+                train_data['loss_relation_real'].append(loss_relation_real if loss_relation_real is not None else 0.0)
+                train_data['loss_relation_synthetic'].append(loss_relation_synthetic if loss_relation_synthetic is not None else 0.0)
+                train_data['loss_bbox_relation'].append(loss_bbox_relation if loss_bbox_relation is not None else 0.0)
+                train_data['loss_bbox_relation_real'].append(loss_bbox_relation_real if loss_bbox_relation_real is not None else 0.0)
+                train_data['loss_bbox_relation_synthetic'].append(loss_bbox_relation_synthetic if loss_bbox_relation_synthetic is not None else 0.0)
+                train_data['loss_giou_relation'].append(loss_giou_relation if loss_giou_relation is not None else 0.0)
+                train_data['loss_giou_relation_real'].append(loss_giou_relation_real if loss_giou_relation_real is not None else 0.0)
+                train_data['loss_giou_relation_synthetic'].append(loss_giou_relation_synthetic if loss_giou_relation_synthetic is not None else 0.0)
+                train_data['lr'].append(lr if lr is not None else 0.0)
     
-    detailed_matches = re.findall(detailed_loss_pattern, content, re.DOTALL)
-    print(f"Found {len(detailed_matches)} detailed training iterations")
-    
-    for match in detailed_matches:
-        iteration = int(match[0])
-        total_loss = float(match[1])
-        loss_ce_subject = float(match[2])
-        loss_bbox_subject = float(match[3])
-        loss_giou_subject = float(match[4])
-        loss_ce_object = float(match[5])
-        loss_bbox_object = float(match[6])
-        loss_giou_object = float(match[7])
-        loss_relation = float(match[8])
-        loss_bbox_relation = float(match[9])
-        loss_giou_relation = float(match[10])
-        lr = float(match[11])
-        
-        train_data['loss_ce_subject'].append(loss_ce_subject)
-        train_data['loss_bbox_subject'].append(loss_bbox_subject)
-        train_data['loss_giou_subject'].append(loss_giou_subject)
-        train_data['loss_ce_object'].append(loss_ce_object)
-        train_data['loss_bbox_object'].append(loss_bbox_object)
-        train_data['loss_giou_object'].append(loss_giou_object)
-        train_data['loss_relation'].append(loss_relation)
-        train_data['loss_bbox_relation'].append(loss_bbox_relation)
-        train_data['loss_giou_relation'].append(loss_giou_relation)
-        train_data['lr'].append(lr)
+    print(f"Found {len(train_data['iterations'])} detailed training iterations with relation losses")
     
     # Extract validation metrics - improved pattern
     # Look for validation blocks with iteration numbers
@@ -554,6 +599,80 @@ def plot_training_curves(train_data, val_data, output_dir='./training_plots'):
         plt.tight_layout()
         plt.savefig(os.path.join(output_dir, 'relation_loss_components.png'), dpi=300, bbox_inches='tight')
         plt.close()
+    
+    # 3.5. Real vs Synthetic Loss Comparison
+    # Check if we have real/synthetic loss data
+    has_real_synthetic = (train_data.get('loss_relation_real') and 
+                         train_data.get('loss_relation_synthetic') and
+                         len(train_data.get('loss_relation_real', [])) > 0 and
+                         len(train_data.get('loss_relation_synthetic', [])) > 0)
+    
+    if has_real_synthetic:
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        
+        # Use common iteration list (all should have same length)
+        max_len = len(train_data['iterations'])
+        iterations = train_data['iterations']
+        
+        # Relation Classification Loss: Real vs Synthetic
+        if (len(train_data['loss_relation_real']) == max_len and 
+            len(train_data['loss_relation_synthetic']) == max_len):
+            real_vals = train_data['loss_relation_real']
+            synthetic_vals = train_data['loss_relation_synthetic']
+            
+            axes[0].plot(iterations, real_vals, 'b-', label='Real', linewidth=2, alpha=0.8)
+            axes[0].plot(iterations, synthetic_vals, 'r-', label='Synthetic', linewidth=2, alpha=0.8)
+            axes[0].set_title('Relation Classification Loss: Real vs Synthetic', fontsize=12, fontweight='bold')
+            axes[0].set_xlabel('Iteration')
+            axes[0].set_ylabel('Loss')
+            axes[0].legend()
+            axes[0].grid(True, alpha=0.3)
+        else:
+            axes[0].text(0.5, 0.5, 'Data length mismatch', ha='center', va='center', transform=axes[0].transAxes)
+            axes[0].set_title('Relation Classification Loss: Real vs Synthetic', fontsize=12, fontweight='bold')
+        
+        # BBox Relation Loss: Real vs Synthetic
+        if (train_data.get('loss_bbox_relation_real') and 
+            train_data.get('loss_bbox_relation_synthetic') and
+            len(train_data['loss_bbox_relation_real']) == max_len and
+            len(train_data['loss_bbox_relation_synthetic']) == max_len):
+            real_vals = train_data['loss_bbox_relation_real']
+            synthetic_vals = train_data['loss_bbox_relation_synthetic']
+            
+            axes[1].plot(iterations, real_vals, 'b-', label='Real', linewidth=2, alpha=0.8)
+            axes[1].plot(iterations, synthetic_vals, 'r-', label='Synthetic', linewidth=2, alpha=0.8)
+            axes[1].set_title('Relation BBox Loss: Real vs Synthetic', fontsize=12, fontweight='bold')
+            axes[1].set_xlabel('Iteration')
+            axes[1].set_ylabel('Loss')
+            axes[1].legend()
+            axes[1].grid(True, alpha=0.3)
+        else:
+            axes[1].text(0.5, 0.5, 'Data length mismatch', ha='center', va='center', transform=axes[1].transAxes)
+            axes[1].set_title('Relation BBox Loss: Real vs Synthetic', fontsize=12, fontweight='bold')
+        
+        # GIoU Relation Loss: Real vs Synthetic
+        if (train_data.get('loss_giou_relation_real') and 
+            train_data.get('loss_giou_relation_synthetic') and
+            len(train_data['loss_giou_relation_real']) == max_len and
+            len(train_data['loss_giou_relation_synthetic']) == max_len):
+            real_vals = train_data['loss_giou_relation_real']
+            synthetic_vals = train_data['loss_giou_relation_synthetic']
+            
+            axes[2].plot(iterations, real_vals, 'b-', label='Real', linewidth=2, alpha=0.8)
+            axes[2].plot(iterations, synthetic_vals, 'r-', label='Synthetic', linewidth=2, alpha=0.8)
+            axes[2].set_title('Relation GIoU Loss: Real vs Synthetic', fontsize=12, fontweight='bold')
+            axes[2].set_xlabel('Iteration')
+            axes[2].set_ylabel('Loss')
+            axes[2].legend()
+            axes[2].grid(True, alpha=0.3)
+        else:
+            axes[2].text(0.5, 0.5, 'Data length mismatch', ha='center', va='center', transform=axes[2].transAxes)
+            axes[2].set_title('Relation GIoU Loss: Real vs Synthetic', fontsize=12, fontweight='bold')
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, 'real_vs_synthetic_losses.png'), dpi=300, bbox_inches='tight')
+        plt.close()
+        print("  -> Saved real vs synthetic loss comparison plot")
     
     # 4. Validation Metrics Detailed - Separate Mean Recall and Recall
     if val_data['iterations'] and val_data['sg_recall_20']:

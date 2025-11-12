@@ -1,7 +1,21 @@
 import sys
 import os
+import warnings
 import numpy as np
 import torch
+
+# Filter Pydantic warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='pydantic')
+warnings.filterwarnings('ignore', message='.*frozen.*Field.*', category=UserWarning)
+warnings.filterwarnings('ignore', message='.*UnsupportedFieldAttributeWarning.*', category=UserWarning)
+
+# Filter PyTorch LR scheduler warnings
+# This warning appears when scheduler.step() is called before optimizer.step()
+# In Detectron2, this happens in the first iteration due to the hook execution order,
+# but it doesn't affect training significantly (only the first LR value might be skipped)
+warnings.filterwarnings('ignore', message='.*lr_scheduler.step.*before.*optimizer.step.*', category=UserWarning)
+warnings.filterwarnings('ignore', message='.*Detected call of.*lr_scheduler.step.*', category=UserWarning)
+
 sys.path.insert(0, '../../')
 sys.path.insert(0, '../')
 

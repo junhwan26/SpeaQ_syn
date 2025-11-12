@@ -665,10 +665,17 @@ class IterativeRelationCriterion(IterativeRelationCriterionBase):
         # Compute standard cross entropy loss (base case)
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_rel_weight)
         
+        # Initialize variables for real/synthetic loss separation
+        loss_ce_real_val = None
+        loss_ce_synthetic_val = None
+        
+        # Get dataset_types if available for more accurate separation
+        dataset_types = kwargs.get('dataset_types', None)
+        
         # Apply loss weights at individual sample level if safe
         if loss_weights is not None and len(idx[0]) > 0:
             # Calculate per-sample loss weights based on batch indices
-            batch_indices = idx[0]  # batch indices of matched samples
+            batch_indices = idx[0]  # batch indices of matched samples (image-level indices)
             sample_weights = loss_weights[batch_indices]
             
             # Enhanced safety check for weights
@@ -696,7 +703,29 @@ class IterativeRelationCriterion(IterativeRelationCriterionBase):
                         
                         # Check for NaN in individual losses and apply weights
                         if not torch.isnan(losses_per_sample).any() and not torch.isinf(losses_per_sample).any():
-                            # Apply individual weights and take mean
+                            # Separate real and synthetic losses for logging (before weighted sum)
+                            # Prefer dataset_type if available (more accurate than weight threshold)
+                            if dataset_types is not None and len(dataset_types) > 0:
+                                # Use dataset_type directly for more accurate separation
+                                real_mask = torch.tensor([dataset_types[i] == 'real' for i in batch_indices.cpu().tolist()], 
+                                                         device=batch_indices.device, dtype=torch.bool)
+                                synthetic_mask = torch.tensor([dataset_types[i] == 'synthetic' for i in batch_indices.cpu().tolist()], 
+                                                              device=batch_indices.device, dtype=torch.bool)
+                            else:
+                                # Fallback to weight-based separation
+                                # Real samples: loss_weight >= 0.75 (typically 1.0)
+                                # Synthetic samples: loss_weight < 0.75 (typically 0.5)
+                                real_mask = sample_weights >= 0.75
+                                synthetic_mask = sample_weights < 0.75
+                            
+                            # Calculate real/synthetic losses separately (for logging only)
+                            if real_mask.any():
+                                loss_ce_real_val = losses_per_sample[real_mask].mean()
+                            
+                            if synthetic_mask.any():
+                                loss_ce_synthetic_val = losses_per_sample[synthetic_mask].mean()
+                            
+                            # Apply individual weights and take mean (for training)
                             weighted_losses = losses_per_sample * sample_weights
                             loss_ce = weighted_losses.mean()
                             
@@ -705,12 +734,38 @@ class IterativeRelationCriterion(IterativeRelationCriterionBase):
                         pass
         
         losses = {'loss_relation': loss_ce}
+        
+        # Initialize all real/synthetic loss keys to prevent KeyError across different iterations/workers
+        # Always add keys to prevent KeyError, but set to 0 if no matched relations exist.
+        # If synthetic samples exist in the batch but their relations aren't matched,
+        # the loss will be logged as 0 (this is normal).
+        device = loss_ce.device
+        dtype = loss_ce.dtype
+        zero_tensor = torch.tensor(0.0, device=device, dtype=dtype)
+        
+        # Relation classification loss
+        if loss_ce_real_val is not None:
+            losses['loss_relation_real'] = loss_ce_real_val
+        else:
+            losses['loss_relation_real'] = zero_tensor.clone()
+        
+        if loss_ce_synthetic_val is not None:
+            losses['loss_relation_synthetic'] = loss_ce_synthetic_val
+        else:
+            losses['loss_relation_synthetic'] = zero_tensor.clone()
+        
+        # Initialize bbox and giou losses (will be set later if matched relations exist)
+        losses['loss_bbox_relation_real'] = zero_tensor.clone()
+        losses['loss_bbox_relation_synthetic'] = zero_tensor.clone()
+        losses['loss_giou_relation_real'] = zero_tensor.clone()
+        losses['loss_giou_relation_synthetic'] = zero_tensor.clone()
 
         if len(idx[0]) > 0:
             src_boxes = outputs['relation_boxes'][idx]
             target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
 
-            loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
+            loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')  # [num_matched, 4]
+            loss_bbox_per_sample = loss_bbox.sum(dim=1)  # [num_matched] - sum over 4 coordinates for per-sample loss
             
             # Apply loss weights to bbox loss at individual sample level
             if loss_weights is not None and len(idx[0]) > 0:
@@ -719,9 +774,28 @@ class IterativeRelationCriterion(IterativeRelationCriterionBase):
                 # Safety check for weights
                 if not torch.isnan(sample_weights).any() and not torch.isinf(sample_weights).any():
                     # Apply individual sample weights
-                    loss_bbox = loss_bbox * sample_weights
+                    loss_bbox_weighted = loss_bbox * sample_weights
                     # Sum weighted losses
-                    losses['loss_bbox_relation'] = loss_bbox.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_bbox.sum()
+                    losses['loss_bbox_relation'] = loss_bbox_weighted.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_bbox_weighted.sum()
+                    
+                    # Separate real/synthetic losses for bbox (weighted sum 전 원본 loss)
+                    dataset_types = kwargs.get('dataset_types', None)
+                    if dataset_types is not None and len(dataset_types) > 0:
+                        # Use dataset_type directly
+                        real_mask = torch.tensor([dataset_types[i] == 'real' for i in batch_indices.cpu().tolist()], 
+                                                 device=batch_indices.device, dtype=torch.bool)
+                        synthetic_mask = torch.tensor([dataset_types[i] == 'synthetic' for i in batch_indices.cpu().tolist()], 
+                                                      device=batch_indices.device, dtype=torch.bool)
+                    else:
+                        # Fallback to weight-based separation
+                        real_mask = sample_weights.squeeze(-1) >= 0.75
+                        synthetic_mask = sample_weights.squeeze(-1) < 0.75
+                    
+                    # Update real/synthetic losses (keys already initialized)
+                    if real_mask.any():
+                        losses['loss_bbox_relation_real'] = loss_bbox_per_sample[real_mask].mean()
+                    if synthetic_mask.any():
+                        losses['loss_bbox_relation_synthetic'] = loss_bbox_per_sample[synthetic_mask].mean()
                 else:
                     losses['loss_bbox_relation'] = loss_bbox.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_bbox.sum()
             else:
@@ -729,7 +803,7 @@ class IterativeRelationCriterion(IterativeRelationCriterionBase):
 
             loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(
                 box_ops.box_cxcywh_to_xyxy(src_boxes),
-                box_ops.box_cxcywh_to_xyxy(target_boxes)))
+                box_ops.box_cxcywh_to_xyxy(target_boxes)))  # [num_matched]
             
             # Apply loss weights to giou loss at individual sample level
             if loss_weights is not None and len(idx[0]) > 0:
@@ -738,9 +812,28 @@ class IterativeRelationCriterion(IterativeRelationCriterionBase):
                 # Safety check for weights
                 if not torch.isnan(sample_weights).any() and not torch.isinf(sample_weights).any():
                     # Apply individual sample weights
-                    loss_giou = loss_giou * sample_weights
+                    loss_giou_weighted = loss_giou * sample_weights
                     # Sum weighted losses
-                    losses['loss_giou_relation'] = loss_giou.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_giou.sum()
+                    losses['loss_giou_relation'] = loss_giou_weighted.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_giou_weighted.sum()
+                    
+                    # Separate real/synthetic losses for giou (weighted sum 전 원본 loss)
+                    dataset_types = kwargs.get('dataset_types', None)
+                    if dataset_types is not None and len(dataset_types) > 0:
+                        # Use dataset_type directly
+                        real_mask = torch.tensor([dataset_types[i] == 'real' for i in batch_indices.cpu().tolist()], 
+                                                 device=batch_indices.device, dtype=torch.bool)
+                        synthetic_mask = torch.tensor([dataset_types[i] == 'synthetic' for i in batch_indices.cpu().tolist()], 
+                                                      device=batch_indices.device, dtype=torch.bool)
+                    else:
+                        # Fallback to weight-based separation
+                        real_mask = sample_weights >= 0.75
+                        synthetic_mask = sample_weights < 0.75
+                    
+                    # Update real/synthetic losses (keys already initialized)
+                    if real_mask.any():
+                        losses['loss_giou_relation_real'] = loss_giou[real_mask].mean()
+                    if synthetic_mask.any():
+                        losses['loss_giou_relation_synthetic'] = loss_giou[synthetic_mask].mean()
                 else:
                     losses['loss_giou_relation'] = loss_giou.sum() / num_relation_boxes if num_relation_boxes > 0 else loss_giou.sum()
             else:
@@ -763,13 +856,19 @@ class IterativeRelationCriterion(IterativeRelationCriterionBase):
         device = next(iter(outputs.values())).device
         losses = {}
 
-        # Extract loss weights from targets
+        # Extract loss weights and dataset types from targets
         loss_weights = []
+        dataset_types = []
         for target in targets:
             if 'loss_weight' in target:
                 loss_weights.append(target['loss_weight'])
             else:
                 loss_weights.append(1.0)  # Default weight
+            
+            if 'dataset_type' in target:
+                dataset_types.append(target['dataset_type'])
+            else:
+                dataset_types.append(None)
         
         # Convert to tensor
         loss_weights = torch.tensor(loss_weights, device=device, dtype=torch.float32)
@@ -788,14 +887,15 @@ class IterativeRelationCriterion(IterativeRelationCriterionBase):
         # Losses
         entity_targets = [{'boxes': x['combined_boxes'], 'labels': x['combined_labels']} for x in augmented_targets]
         relation_targets = [{'boxes': x['relation_boxes'], 'labels': x['relation_labels']} for x in augmented_targets]
-        kwargs = {'aux_loss' : False, 'loss_weights': loss_weights}
+        # Pass dataset_types to loss computation for more accurate real/synthetic separation
+        kwargs = {'aux_loss' : False, 'loss_weights': loss_weights, 'dataset_types': dataset_types}
         losses.update(self.get_relation_losses(relation_outputs_without_aux, entity_targets, relation_targets, combined_indices, **kwargs))
         if 'aux_outputs_r' in outputs:
             for i, (aux_outputs_r, aux_outputs_r_sub, aux_outputs_r_obj) in enumerate(zip(outputs['aux_outputs_r'], outputs['aux_outputs_r_sub'], outputs['aux_outputs_r_obj'])):
                 relation_aux_outputs = {'relation_logits': aux_outputs_r['pred_logits'], 'relation_boxes': aux_outputs_r['pred_boxes'],
                                         'relation_subject_logits': aux_outputs_r_sub['pred_logits'], 'relation_subject_boxes': aux_outputs_r_sub['pred_boxes'],
                                         'relation_object_logits': aux_outputs_r_obj['pred_logits'], 'relation_object_boxes': aux_outputs_r_obj['pred_boxes']}
-                kwargs = {'log': False, 'aux_loss' : True, 'loss_weights': loss_weights}
+                kwargs = {'log': False, 'aux_loss' : True, 'loss_weights': loss_weights, 'dataset_types': dataset_types}
                 if self.match_independent:
                     combined_indices, k_mean_log, augmented_targets = self.matcher.forward_relation(relation_aux_outputs, targets, layer_num=i + 1)
                     entity_targets = [{'boxes': x['combined_boxes'], 'labels': x['combined_labels']} for x in augmented_targets]

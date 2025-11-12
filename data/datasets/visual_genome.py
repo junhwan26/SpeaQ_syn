@@ -241,7 +241,7 @@ class VisualGenomeTrainData:
             'rel_classes': self.idx_to_predicates + ['__background__'],
             'att_classes': self.idx_to_attributes,
         }
-        print (torch.from_numpy(fg_rel_count).float())
+        #print (torch.from_numpy(fg_rel_count).float())
         
         # Avoid metadata conflicts by checking if statistics already exist
         try:

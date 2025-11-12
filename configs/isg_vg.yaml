@@ -1,0 +1,100 @@
+MODEL:
+  META_ARCHITECTURE: "IterativeRelationDetr"
+  WEIGHTS: "/home/junhwanheo/SpeaQ/vg_objectdetector_pretrained.pth"
+  PIXEL_MEAN: [123.675, 116.280, 103.530]
+  PIXEL_STD: [58.395, 57.120, 57.375]
+  MASK_ON: False
+  RESNETS:
+    DEPTH: 101
+    STRIDE_IN_1X1: False
+    OUT_FEATURES: ["res2", "res3", "res4", "res5"]
+  DETR:
+    NAME: 'IterativeRelationDETR'
+    TRANSFORMER: 'IterativeRelationTransformer'
+    CRITERION: 'IterativeRelationCriterion'
+    MATCHER: 'IterativeHungarianMatcher'
+    ONE2MANY_SCHEME: 'dynamic'
+    ONE2MANY_DYNAMIC_SCHEME: 'max'
+    ONE2MANY_K: 4
+    MULTIPLY_QUERY: 2
+    MATCH_INDEPENDENT: True
+    USE_GROUP_MASK: True
+    ONLY_PREDICATE_MULTIPLY: True
+    GIOU_WEIGHT: 2.0
+    L1_WEIGHT: 5.0
+    NUM_OBJECT_QUERIES: 300
+    NUM_RELATION_QUERIES: 300
+    NUM_CLASSES: 150
+    OBJECT_DEC_LAYERS: 6
+    REWEIGHT_RELATIONS: True
+    REWEIGHT_REL_EOS_COEF: 0.1
+    NO_OBJECT_WEIGHT: 0.1
+    NO_REL_WEIGHT: 0.1
+    NUM_GROUPS: 4
+    ONE2MANY_PREDICATE_SCORE: True
+    ONE2MANY_PREDICATE_WEIGHT: -0.5
+    OVERSAMPLE_PARAM: 0.07
+    UNDERSAMPLE_PARAM: 1.5
+DATASETS:
+  TYPE: "MULTI_DATASET"
+  TRAIN: ('MULTI_train',)
+  TEST: ('VG_test',)
+  VISUAL_GENOME:
+    TRAIN_MASKS: ""
+    VAL_MASKS: ""
+    TEST_MASKS: ""
+    FILTER_EMPTY_RELATIONS: True
+    FILTER_NON_OVERLAP: False
+    FILTER_DUPLICATE_RELATIONS: True
+    IMAGES: '/home/dataset/vg/VG_100K'
+    MAPPING_DICTIONARY: '/home/dataset/vg/VG-SGG-dicts-with-attri.json'
+    IMAGE_DATA: '/home/dataset/vg/image_data.json'
+    VG_ATTRIBUTE_H5: '/home/junhwanheo/SpeaQ/VG-SGG-with-attri.h5'
+  VISUAL_GENOME_SYNTHETIC:
+    TRAIN_MASKS: ""
+    VAL_MASKS: ""
+    TEST_MASKS: ""
+    FILTER_EMPTY_RELATIONS: True
+    FILTER_NON_OVERLAP: False
+    FILTER_DUPLICATE_RELATIONS: True
+    IMAGES: '/home/dataset/vg_syn/flux_mR_aware_generated/01/'
+    MAPPING_DICTIONARY: '/home/dataset/vg/VG-SGG-dicts-with-attri.json'
+    IMAGE_DATA: '/home/junhwanheo/DA-SGG/datasets/generated/image_data_refined_synthetic_only.json'
+    VG_ATTRIBUTE_H5: '/home/junhwanheo/DA-SGG/datasets/generated/VG-SGG-with-attri-refined-synthetic_only.h5'
+  MULTI_DATASET:
+    ENABLED: True
+    REAL_SAMPLING_RATIO: 0.7
+    SYNTHETIC_SAMPLING_RATIO: 0.3
+    REAL_LOSS_WEIGHT: 1.0
+    SYNTHETIC_LOSS_WEIGHT: 0.5
+SOLVER:
+  IMS_PER_BATCH: 20
+  BASE_LR: 0.0001
+  STEPS: (96000,)
+  MAX_ITER: 150000
+  WARMUP_FACTOR: 1.0
+  WARMUP_ITERS: 10
+  WEIGHT_DECAY: 0.0001
+  OPTIMIZER: "ADAMW"
+  BACKBONE_MULTIPLIER: 0.1
+  CHECKPOINT_PERIOD: 1000
+  CLIP_GRADIENTS:
+    ENABLED: True
+    CLIP_TYPE: "full_model"
+    CLIP_VALUE: 0.01
+    NORM_TYPE: 2.0
+  AMP:
+    ENABLED: True
+INPUT:
+  MIN_SIZE_TRAIN: (480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800)
+  CROP:
+    ENABLED: True
+    TYPE: "absolute_range"
+    SIZE: (384, 600)
+  FORMAT: "RGB"
+TEST:
+  EVAL_PERIOD: 6000
+DATALOADER:
+  FILTER_EMPTY_ANNOTATIONS: False
+  NUM_WORKERS: 8
+VERSION: 2

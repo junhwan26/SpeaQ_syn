@@ -49,7 +49,7 @@ DATASETS:
     IMAGES: '/home/dataset/vg/VG_100K'
     MAPPING_DICTIONARY: '/home/dataset/vg/VG-SGG-dicts-with-attri.json'
     IMAGE_DATA: '/home/dataset/vg/image_data.json'
-    VG_ATTRIBUTE_H5: '/home/dataset/vg/VG-SGG-with-attri.h5'
+    VG_ATTRIBUTE_H5: '/home/junhwanheo/SpeaQ/VG-SGG-with-attri.h5'
   VISUAL_GENOME_SYNTHETIC:
     TRAIN_MASKS: ""
     VAL_MASKS: ""
@@ -59,16 +59,17 @@ DATASETS:
     FILTER_DUPLICATE_RELATIONS: True
     IMAGES: '/home/dataset/vg_syn/flux_mR_aware_generated/01/'
     MAPPING_DICTIONARY: '/home/dataset/vg/VG-SGG-dicts-with-attri.json'
+    
     IMAGE_DATA: '/home/junhwanheo/DA-SGG/datasets/generated/image_data_refined_synthetic_only.json'
-    VG_ATTRIBUTE_H5: '/home/junhwanheo/DA-SGG/datasets/generated/VG-SGG-with-attri-refined-synthetic_only.h5'
+    VG_ATTRIBUTE_H5: '/home/junhwanheo/SpeaQ/synthetic_dataset/VG-SGG-with-attri-refined-with-pseudo-labels-synthetic_only.h5'
   MULTI_DATASET:
     ENABLED: True
-    REAL_SAMPLING_RATIO: 0.8
-    SYNTHETIC_SAMPLING_RATIO: 0.2
+    REAL_SAMPLING_RATIO: 0.7
+    SYNTHETIC_SAMPLING_RATIO: 0.3
     REAL_LOSS_WEIGHT: 1.0
     SYNTHETIC_LOSS_WEIGHT: 0.5
 SOLVER:
-  IMS_PER_BATCH: 5
+  IMS_PER_BATCH: 10
   BASE_LR: 0.0001
   STEPS: (96000,)
   MAX_ITER: 150000
